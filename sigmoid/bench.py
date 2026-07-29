@@ -27,8 +27,8 @@ arm is how this kind of work goes wrong.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import Callable, Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 import numpy as np
 

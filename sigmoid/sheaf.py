@@ -144,7 +144,7 @@ class SheafGate:
         states: np.ndarray,
         topo_dim: int,
         effective_ranks: np.ndarray | None = None,
-    ) -> "SheafGate":
+    ) -> SheafGate:
         """Learn R and the support model from calibration states (N, state_dim).
 
         `effective_ranks` is the optional third stalk: one `effective_rank(W)`
@@ -255,7 +255,7 @@ class SheafGate:
         }
 
     @classmethod
-    def from_state_dict(cls, payload: dict) -> "SheafGate":
+    def from_state_dict(cls, payload: dict) -> SheafGate:
         gate = cls(quantile=float(payload["quantile"]), ridge=float(payload["ridge"]))
         gate.R_ = payload["R_"]
         gate.mean_ = payload["mean_"]

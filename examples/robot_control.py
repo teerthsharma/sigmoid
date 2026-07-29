@@ -82,7 +82,7 @@ def collect(episodes: int = 40, length: int = 90, seed: int = 0):
     """Random-action rollouts, the calibration data for the world model."""
     rng = np.random.default_rng(seed)
     observations, actions = [], []
-    for ep in range(episodes):
+    for _ in range(episodes):
         start = STARTS + rng.normal(scale=1.2, size=STARTS.shape)
         swarm = Swarm(start)
         obs = [swarm.observe()]

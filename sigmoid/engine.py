@@ -19,9 +19,10 @@ decides how far that trade can be pushed before it stops being honest.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -160,7 +161,7 @@ class SigmoidWorldModel:
         layer: int | str = -1,
         config: SigmoidConfig | None = None,
         actions: Sequence[np.ndarray] | None = None,
-    ) -> "SigmoidWorldModel":
+    ) -> SigmoidWorldModel:
         """Convert a normal model into a world model in one call.
 
         `inputs` is an iterable of whatever the model consumes -- prompts,
@@ -175,7 +176,7 @@ class SigmoidWorldModel:
         self,
         trajectories: Sequence[np.ndarray],
         actions: Sequence[np.ndarray] | None = None,
-    ) -> "SigmoidWorldModel":
+    ) -> SigmoidWorldModel:
         """Calibrate encoder, operator and gate on hidden-state trajectories.
 
         Each trajectory is (T, D). Windows never straddle a trajectory
@@ -486,7 +487,7 @@ class SigmoidWorldModel:
         return path if path.suffix else path.with_suffix(".npz")
 
     @classmethod
-    def load(cls, path: str | Path) -> "SigmoidWorldModel":
+    def load(cls, path: str | Path) -> SigmoidWorldModel:
         data = np.load(Path(path), allow_pickle=True)
         wm = cls(config=SigmoidConfig(**data["config"].item()))
         wm.hidden_dim = int(data["hidden_dim"])
