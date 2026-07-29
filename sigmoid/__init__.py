@@ -52,6 +52,15 @@ from .inference import (
 from .nbody import MultiBodyCoupling
 from .operator import CouplingOperator, RolloutCertificate
 from .providers import Completion, Message, Provider, ProviderError, ToolSpec
+from .realtime import (
+    ActionChunker,
+    ConfidenceGate,
+    GateOutcome,
+    LatencyBudget,
+    SafetyController,
+    Tier,
+    Watchdog,
+)
 from .robot import RobotAgent
 from .sheaf import GateReading, SheafGate
 from .state import (
@@ -63,6 +72,14 @@ from .state import (
     h1_barcode,
     hilbert_coefficients,
 )
+from .telemetry import (
+    BlackboxRecorder,
+    DeterministicReplay,
+    LatencyProfiler,
+    Tracepoint,
+    trace,
+    tracepoint,
+)
 from .triton import (
     AttentionPatch,
     IncrementalSalience,
@@ -73,10 +90,27 @@ from .triton import (
     topology_attention,
     zero_dim_persistence_salience,
 )
+from .vision import TopoImageEncoder, TopoVisionConfig, euler_characteristic
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "ActionChunker",
+    "BlackboxRecorder",
+    "ConfidenceGate",
+    "DeterministicReplay",
+    "GateOutcome",
+    "LatencyBudget",
+    "LatencyProfiler",
+    "SafetyController",
+    "Tier",
+    "TopoImageEncoder",
+    "TopoVisionConfig",
+    "Tracepoint",
+    "Watchdog",
+    "euler_characteristic",
+    "trace",
+    "tracepoint",
     "Agent",
     "AgentResult",
     "AttentionPatch",
