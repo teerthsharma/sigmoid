@@ -6,6 +6,48 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Inference engine** (`sigmoid/inference.py`) — prefill + decode with a real KV
+  cache, schedules grown by `IncrementalSalience` rather than rebuilt (fires once
+  per 64 decode steps, bit-identical to a batch rebuild), streaming, and stats
+  that report schedule time apart from attention time.
+- **Kernel bridge** (`sigmoid/triton/attention.py`) — 2D/4D wrapper feeding
+  sigmoid's schedule to the merged `triton-lang/kernels#22` kernel, with a torch
+  fallback that runs with no GPU and no triton.
+- **Model patching** (`sigmoid/triton/patch.py`) — swaps topology-sparse attention
+  into HuggingFace models through the attention-interface registry; `restore()`
+  is bit-identical.
+- **Providers** (`sigmoid/providers/`) — 12 backends behind one interface
+  (local, ollama, vllm, openai, anthropic, gemini, groq, deepseek, mistral,
+  together, openrouter, xai). Keys are read from the environment per request and
+  never stored; a redaction layer and six named tests check a planted canary key
+  cannot reach a repr, str, or raised exception.
+- **Hooks** (`sigmoid/hooks.py`) — nine hook points, veto, and failure isolation:
+  a broken hook cannot stop the run or shadow a safety gate queued behind it.
+- **Agent runtime** (`sigmoid/agent.py`, `sigmoid/robot.py`) — Hermes
+  `<tool_call>` parsing that returns a result for every malformed case rather
+  than raising, plus a robot bridge where an infeasible plan is a structured
+  refusal the model can reason about. Three independent gates: schema validation
+  rejecting unknown keys, `HookVeto`, and out-of-conversation confirmation for
+  `dangerous=True` tools.
+
+### Fixed
+- Registering an attention implementation only in `ALL_ATTENTION_FUNCTIONS`
+  makes transformers return **no mask at all**. Invisible when every layer is
+  patched; with `layers=[0]` the logit error was 1.342e+02 against 1.877e-01,
+  five layers attending to the future while emitting plausible text. Now also
+  registered in `ALL_MASK_ATTENTION_FUNCTIONS`.
+- A hook returning any truthy value replaced the context payload rather than
+  only a dict — capable of handing an actuator the wrong value.
+
+### Measured
+- Dense backend reproduces HF `generate(do_sample=False)` 64/64 tokens; a
+  saturated schedule through the sparse path matches token-for-token, KL < 1e-9.
+- **Sparse attention does not pay** on anything distilgpt2 can run. Crossover is
+  ~16k positions at 12×64, ~8k at 32×128; distilgpt2 caps at 1024, so every
+  winning row is synthesized. Root cause: `index_select` gather costs 2.58 ms
+  against 0.82 ms of attention at 65536.
+
 ### Fixed
 - `h0_barcode` inherited the `csr_matrix` explicit-zero bug that was previously
   fixed only in the schedule path. Coincident points lost the zero-length edge

@@ -10,8 +10,10 @@ badly appear here unchanged.
 |---|---|
 | Python | 3.11.9 |
 | numpy / scipy | 1.26.4 / 1.17.1 |
-| torch | 2.5.1+cu121 |
-| Model under capture | distilgpt2 (6 layers, 768 hidden), local cache, CPU |
+| torch / triton | 2.5.1+cu121 / 3.7.1 |
+| GPU | NVIDIA RTX 4060 Laptop |
+| Model under capture | distilgpt2 (6 layers, 768 hidden), local cache |
+| Kernel | `triton-lang/kernels#22`, used as merged |
 
 ---
 
@@ -237,10 +239,147 @@ constructed systems: psi contributes exactly nothing there.
 
 ---
 
+## 8. Triton kernel path
+
+RTX 4060 Laptop GPU, triton 3.7.1, torch 2.5.1+cu121. The kernel is
+`triton-lang/kernels#22`, used as merged; sigmoid supplies the schedule.
+
+### Kernel vs the merged torch reference, identical schedule
+
+| dtype | max abs diff |
+|---|---|
+| fp16 | 9.77e-04 – 1.95e-03 |
+| bf16 | 7.81e-03 – 1.56e-02 |
+| fp32 | 1.69e-03 – 2.39e-03 |
+
+fp32 looser than fp16 is `tl.dot` defaulting to tf32 on Ampere+ (~10 mantissa
+bits against the reference's 24), not a defect.
+
+### Whole path is real causal attention, not merely self-consistent
+
+| check | result |
+|---|---|
+| dense-causal schedule vs `F.scaled_dot_product_attention(is_causal=True)` | 9.77e-04 fp16 |
+| same, CPU torch backend | **2.68e-07** |
+| schedule bit-identity vs the reference builder, 20 configurations | `np.array_equal` True |
+
+Caveat found by stress-testing: on heavily clustered fp16 keys with near-tied
+merge heights, sigmoid and the reference diverge on ~2/300 trials. Traced to an
+8.9e-16 gap between `torch.cdist` (which switches to the cancellation-prone
+Gram identity above 25 points) and `scipy.cdist`, amplified by ties. Sigmoid's
+side is the more accurate one. Realistic keys do not reach it.
+
+### Patching a real model (distilgpt2, 1000 tokens, fp32)
+
+| | max abs logit diff |
+|---|---|
+| **dense-causal schedule — the wiring proof** | 2.750e-01 |
+| same, `TRITON_F32_DEFAULT=ieee` | **3.967e-04** |
+| transformers' own eager vs sdpa, for scale | 2.670e-04 |
+| degenerate-dense topology schedule vs explicit dense | **0.000e+00** |
+| topology (sink=1, local=2, topk=4 of 16) | 9.646e+01, KL **0.0426** nats |
+| `restore()` | bit-identical (`torch.equal`) |
+
+Nearly all of the 2.750e-01 is tf32. The error budget starts at one tf32
+rounding per layer, and the bit-identical degenerate-dense row proves the CSR
+reaches the kernel intact — so the topology figure is a sparsity cost, not
+plumbing.
+
+**Causality bug caught here.** Registering only in `ALL_ATTENTION_FUNCTIONS`
+makes `_preprocess_mask_arguments` return **no mask** (the TGI/vLLM path).
+Invisible when every layer is patched — 2.750e-01 either way. With `layers=[0]`:
+
+| | max abs logit diff |
+|---|---|
+| mask registered | 1.877e-01 |
+| **mask absent** | **1.342e+02** |
+
+Five unpatched layers attending to the future while emitting plausible text.
+Fixed by also registering in `ALL_MASK_ATTENTION_FUNCTIONS`.
+
+---
+
+## 9. Inference engine
+
+### Correctness, before any speed claim
+
+| control | result |
+|---|---|
+| `backend="dense"` vs HF `generate(do_sample=False)` | **64/64 tokens identical** |
+| saturated schedule through the *sparse* path (torch and triton) | token-for-token, KL < 1e-9 |
+
+The second separates "plumbing is wrong" from "sparsity costs quality".
+
+### Quality, context 960, 48 greedy tokens
+
+| topk | radius | density | KL (nats) | first div | diverged |
+|---|---|---|---|---|---|
+| saturated | saturated | 1.000 | 0.00000 | — | 0/48 |
+| 8 | 2 | 0.721 | 0.03960 | 2 | 46/48 |
+| 4 | 1 | 0.481 | 0.11923 | 0 | 46/48 |
+| 2 | 1 | 0.414 | 0.09911 | 0 | 43/48 |
+| **0** | 1 | 0.350 | **0.99315** | 0 | 47/48 |
+
+Uniform-random-token context is slightly worse: 0.085 / 0.156 / 0.150 / 1.213.
+The last row is load-bearing: dropping topology entirely at similar density
+costs **8–14× the KL**, so the salient blocks earn their place.
+
+### Speed — topology loses on anything distilgpt2 can run
+
+End-to-end, best of 3: dense **102/97/95** tok/s at context 256/512/960 against
+topology **51/70/78**. Laptop clock drift is ±20% run to run, the same size as
+the effect, so the attention-op table is the trustworthy one.
+
+| positions | 12×64 dense/topo | 32×128 dense/topo | density |
+|---|---|---|---|
+| 1024 *(real)* | 0.216 / 0.287 → 0.75× | 0.237 / 0.597 → 0.40× | 1.000 |
+| 4096 | 0.183 / 0.293 → 0.62× | 0.579 / 0.891 → 0.65× | 0.34 |
+| 8192 | 0.267 / 0.290 → 0.92× | **1.137 / 0.917 → 1.24×** | 0.18 |
+| 16384 | **0.600 / 0.545 → 1.10×** | 2.562 / 0.924 → 2.77× | 0.094 |
+| 65536 | 2.050 / 1.087 → 1.89× | — | 0.023 |
+| 131072 | 3.399 / 0.545 → **6.24×** | — | 0.012 |
+
+**Crossover ~16k positions at 12×64, ~8k at 32×128.** distilgpt2 caps at 1024,
+so every winning row is **synthesized** — real K/V at the model's head geometry,
+no token generated. Only the 1024 row is a real forward pass.
+
+**Root cause of the loss, measured:** `index_select` materializes the selection,
+so a decode step reads the chosen keys *and writes them back*. At 12×64 /
+65536, gather alone costs **2.58 ms** against **0.82 ms** for attention over the
+same slice. Sparsity pays only once density drops far enough that the write
+beats a dense read. Fix is a fused decode kernel; the merged kernel cannot serve
+decode, it requires `q.shape == k.shape`.
+
+### Schedule build is not the bottleneck
+
+Context 960, 64 tokens: schedule **44 ms** against attention **199 ms** — ~18%
+of the sparse path. `IncrementalSalience` fires only on the token completing a
+block, verified as exactly once per 64 decode steps, bit-identical to a batch
+rebuild.
+
+---
+
+## 10. Upstream kernel: two silent failure modes
+
+Found while wrapping it; neither is caught by the kernel and both are worth a
+follow-up PR to `triton-lang/kernels`.
+
+| input | behaviour |
+|---|---|
+| empty CSR row | `acc/0` → returns **NaN with no error** |
+| out-of-range block index | out-of-bounds load; the only mask is `k_pos < seq`, which a negative index passes |
+
+Also: the merged `dense_masked_attention` is 2D-only. On 4D input `q @ k.T`
+reverses all four dims and throws a confusing broadcast error. Sigmoid's wrapper
+loops it over flattened batch×heads.
+
+
+---
+
 ## Reproducing
 
 ```bash
-python -m pytest tests/ -q
+python -m pytest tests/ -q                 # 207 checks
 python examples/s2_rips_corpus.py
 python examples/contact_world.py
 python examples/falsify_condition.py
