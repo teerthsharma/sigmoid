@@ -460,13 +460,283 @@ Fits a 20 ms control budget with three orders of magnitude to spare.
 
 ---
 
+## 14. AETHER primitives, absorbed
+
+From `apoth3osis.io/research/projects/aether-runtime-integration` (Lean 4 verified,
+710 tests, 0 `sorry`). Each went into the function it guards, not a module of its
+own. One did not transfer and is recorded as such.
+
+| primitive | absorbed into | outcome |
+|---|---|---|
+| Chebyshev eviction | `telemetry.chebyshev_keep` + `BlackboxRecorder.compact` | **works** - ceiling n/k^2 held on gaussian, Cauchy and constant scores at k=2 and k=3 |
+| Lyapunov gain | `operator.LyapunovGain` + `stabilized_rollout` | **works** - arrests divergence without clipping |
+| Betti bound | `vision.betti1_bound`, used by `betti_from_euler` | **works** - b1 inside [0, b0+(n-3)] on 7 masks incl. border cases |
+| Cauchy-Schwarz pruning | attempted in `triton/schedule.py` | **does not transfer** |
+
+### Lyapunov against the spectral clip
+
+`rho_max` buys a Banach bound by overwriting the measured dynamics, and it costs
+accuracy: 0.067 -> 0.317 one-step NRMSE on Lorenz. A Lyapunov PD correction reaches
+stability without touching the operator. Expansive operator, rho **1.600**, unclipped:
+
+| rollout, 40 steps | norm start | norm end |
+|---|---|---|
+| plain | 2.98 | 2.72e+08 |
+| Lyapunov (alpha 0.5, beta 0.2, dt 1) | 1.49 | **3.30e-03** |
+
+Gains violating `alpha + beta/dt < 1` are **refused**, not silently applied.
+
+### Cauchy-Schwarz pruning - negative result
+
+Correct bound, never binds. In the tighter centroid-plus-radius form
+(`q.k = q.c + q.(k-c) <= q.c + norm(q) r`), minimum achievable mass bound:
+
+| key geometry | block radius | mass upper bound |
+|---|---|---|
+| isotropic gaussian | 9.61 | >= 2.6e+04 |
+| tight clusters (sigma 0.15) | 1.41 | >= 1.88 |
+| very tight (sigma 0.02) | 0.19 | >= 0.47 |
+
+Pruning a 64-key block at eps=1e-3 needs its ceiling `log(1e-3/64) = -11.1` nats
+below the global max; attention logits at scale 1/sqrt(64) span roughly +-3. Even the
+last row would mean calling 47% of the softmax mass negligible. Whole-key
+`norm(q) norm(k)` pruned **0/480 blocks**. Same failure shape as the scalar Banach
+certificate: true, vacuous. The dead function was removed and the finding recorded in
+`schedule.py` so it is not retried.
+
+---
+
+## 15. Quantization
+
+Verdict rule is a property of the model, not a chosen tolerance: **usable == added
+rollout error <= the operator's own fitted residual.**
+
+Contractive operator, rho 0.70, fitted rmse 9.95e-03:
+
+| precision | bytes | x | step rmse | 16-step rmse | p50 us | verdict |
+|---|---|---|---|---|---|---|
+| fp64 (ref) | 8448 | 1.00 | - | - | 0.70 | reference |
+| fp32 | 4224 | 2.00 | 9.65e-09 | 2.32e-09 | 0.80 | usable |
+| fp16 | 2112 | 4.00 | 7.70e-05 | 1.98e-05 | **3.10** | usable |
+| int8 per-row | 1184 | 7.14 | 2.17e-03 | 6.13e-04 | 0.80 | usable |
+| int8 global | 1060 | 7.97 | 3.49e-03 | 7.29e-04 | 0.80 | usable |
+
+On an operator whose rows span 4 decades (rho 3.39), **both int8 variants dominate
+the error**. fp32 and fp16 stay usable.
+
+**Quantization buys bytes, not speed.** No precision beats fp64 in numpy; fp16 is
+**4.4x slower** (3.10 against 0.70 us) because there is no fp16 BLAS path and numpy
+upcasts per call. int8 has no GEMM at all. So int8 is a transport and residency
+precision here, not a compute one - which is why `PrecisionPolicy` never claims low
+precision fixes a latency overrun, and why the tier map is the **inverse** of the
+obvious one: contact-rich gets fp32, free-space gets int8. Precision follows accuracy
+tolerance, not deadline.
+
+### Was per-row scaling necessary? No - and it stays on
+
+| operator | row spread | worst-row err (per-row) | (global) | rows destroyed by global |
+|---|---|---|---|---|
+| well-conditioned | 2.3x | 8.95e-03 | 1.25e-02 | **0/32** |
+| rows over 4 decades | 2513x | 7.64e-03 | 1.00e+00 | **16/32** |
+
+The premise was **false** for a spectrally-projected operator: the engine's real
+Lorenz `W_` (52x53) spans only 2.54x and a global scale destroys nothing. It is
+emphatically true for raw-units robot state - mm beside radians beside newtons.
+Per-row costs `state_dim` float32s, about 0.1% of the payload.
+
+**A zero-row bug that would have shipped a brick.** 31 of the 52 rows of the real
+Lorenz operator are exactly zero - the block-diagonal fit leaves the psi-to-u
+quadrant empty. Per-row scaling divides by `max|row|`, so unguarded it writes **NaN
+into 60% of the matrix**, and a NaN operator emits a NaN action a robot executes.
+
+### Hardware probe, this host
+
+```
+cpu   28 logical, 241 GFLOP/s measured      ram  15.7 GiB
+gpu   RTX 4060 Laptop, 8188 MB, cc 8.9      22.1 TFLOP/s fp16 measured
+class high-end-edge
+```
+
+TOPS is measured, not read from a spec sheet. **`nvidia-smi` costs 32 ms
+steady-state** - above the 20 ms contact-rich budget and 32x the safety-stop budget.
+Reading GPU temperature inline *is itself* the deadline miss, so the 1 s cache is not
+an optimization; real deployments sample it off-thread.
+
+### OTA atomicity
+
+| check | result |
+|---|---|
+| `os.replace` under a live reader | 12 swaps, **0 torn reads**, >=2 distinct whole payloads |
+| hash rejection | 3 paths (tampered, truncated, missing keys); old weights still load bit-identically |
+| TOCTOU | digest re-checked at commit, not trusted from stage |
+| crash between stage and commit | recovers; one `commit()` finishes it |
+
+**Windows wrinkle, load-bearing:** `os.replace` onto a path another handle holds open
+raises `PermissionError` - a continuous reader blocked **300 of 300** swaps, because
+Python's `open` and `np.load` do not pass `FILE_SHARE_DELETE`. Handled with bounded
+retry and a named `StagingError` rather than a half-applied update.
+
+Structural validation uses `allow_pickle=False`, reading the zip directory without
+unpickling, so a malformed transfer is rejected without executing the payload. The
+residual risk is stated plainly: integrity is not safety, so the digest must arrive by
+a channel the weights did not.
+
+### Hysteresis
+
+Schmitt band (derate at 80 C, recover below 70) plus a dwell counter:
+
+| signal | switches |
+|---|---|
+| 72-78 C, any period | **0** (never crosses the band) |
+| 60-95 C, half-period 1-2, dwell 3 | **0** (streak starved) |
+| 60-95 C, half-period 8, dwell 3 | 7 |
+| same, dwell 10 | **0** |
+| sustained 95 -> 65 C | exactly 2 - hysteresis is not paralysis |
+
+---
+
+## 16. Visualization
+
+Self-contained HTML plus inline SVG, stdlib and numpy only. No matplotlib, no PIL.
+
+| check | result |
+|---|---|
+| XML well-formedness, all 5 renderers | parses with `ET.fromstring` |
+| external references | **0** live refs across all pages |
+| elements outside their viewBox | **0** across 12 fragments |
+| hostile reason string (script tags, quotes, URL) | stays well-formed, no raw script tag |
+
+| page | size |
+|---|---|
+| 32-step rollout, real fitted world | **21.1 KiB** |
+| 64x64 image filmstrip | 22.9 KiB |
+| 256x256 uniform noise (incompressible worst case) | 0.32 MiB capped, 2.69 MiB uncapped |
+| full dashboard, 4 panels | 34.4 KiB |
+
+PNG writer is about 20 lines of `zlib` and `struct`, verified by decoding the base64
+back out and reading IHDR dimensions, colour type and the IEND CRC. No fallback needed.
+
+**Two real bugs the audit caught.** HTML named entities are undefined in XML, so a
+page that rendered fine in a browser died on `undefined entity` at column 12808 -
+numeric refs only now. And `grounded_at` is `None` whenever `imagine(stop_on_gate=
+False)` is used, which every planner path does, so trusting the field alone renders a
+**clean page for a rejected rollout**; the fire is now derived from `.readings`.
+
+
+---
+
+## 17. Automatic config selection (governor)
+
+Port of the LAAMBA Topological Governor, adapted: sigmoid picks encoder and operator
+settings, not Riemannian curvature. Selection accuracy **8 of 9**, with the miss named.
+
+| system | got | want | delta | conf |
+|---|---|---|---|---|
+| s2_rips 21 nodes | 3 | 3 | +3.11 | 0.50 |
+| s2_rips 15 nodes | 3 | 3 | +3.41 | 0.50 |
+| **s2_rips 22 nodes** | **2** | **3** | +4.41 | 0.50 |
+| lorenz, 3 seeds | 0 | 0 | +0.84 / +0.04 / +0.47 | 0.16-0.96 |
+| vision topo features | 0 | 0 | +0.76 | 0.24 |
+| ar(1) sequence | 0 | 0 | +0.26 | 0.74 |
+| uniform noise | 0 | 0 | +0.03 | 0.97 |
+
+**The miss is mechanistic, not noise.** `3n` is divisible by 2 only for even `n`, and
+an interleaved width-2 reshape keeps the cluster structure with 1.5x the points, so a
+statistic that grows with point count takes it. Odd node counts (11, 15, 21) are all
+correct.
+
+### Three criteria measured and rejected
+
+| criterion | accuracy | why it failed |
+|---|---|---|
+| `psi -> next state` | ridge-dependent | S2 needs ridge 1e-3, Lorenz 1e2, vision <=1. No single value gets all three. |
+| held-out rollout NRMSE | **1 of 5** | ranks the bogus width first on S2 - correctly, since the S2 partition contributes exactly zero to coordinate rollout |
+| `select_cloud` as-is | **1 of 3** | on these candidate sets |
+| **H0 plateau vs point-count-matched control** | **8 of 9** | shipped |
+
+The control is the whole content: raw plateau width alone ranks the bogus width first
+on Lorenz. Threshold 1.0 sits in a factor-1.4 gap across eleven systems (non-entity
+family peaks at +0.84, entity family floors at +1.19).
+
+### Does the recommendation beat the default? On S2, no
+
+| system | config | k=1 | k=4 | k=16 |
+|---|---|---|---|---|
+| s2_rips 21 | recommended (e=3) | 1.6965 | 4.5628 | 10.8414 |
+| | default (e=0) | **0.7328** | **1.9597** | **3.2262** |
+| lorenz | recommended (lin=24) | 0.1013 | 0.4044 | 1.2261 |
+| | default (lin=32) | 0.1013 | 0.4044 | 1.2261 |
+
+Reported as measured: 0 win, 0 tie, 3 loss on S2. Both arms sit above nrmse 1.0 -
+worse than predicting zero - so `compare()` is not measuring prediction on that corpus
+at all. On the metric it does measure, `psi -> held-out island count`: **recommended
+0.7628, default -2.9272**. Lorenz ties to four decimals at 8 fewer state dimensions.
+
+### A finding that contradicts the brief
+
+The plateau band centre is **not** the generator's interaction radius. The corpus
+threshold of 0.95 rad is 0.9147 in chord distance and lands in a band ranked 4th of 19
+by width. The plateau finds the scale at which the configuration separates - the cap
+radius - not a threshold a labeller chose. "Band centre is the interaction radius"
+holds only for the geometry's own radius, which is the one psi can read without labels.
+
+Second caveat: raw plateau `excess` has a heavy-tailed null. Uniform random clouds read
+2.07 at m=6, 4.14 at m=21, 5.24 at m=32, so it cannot separate Lorenz (4.25) from noise
+(5.37) on temporal clouds. `PlateauReport.readable` therefore only refuses degenerate
+clouds, and says so.
+
+### Five bugs fixed against the source
+
+1. Unseeded `np.random.choice` -> seeded. Two runs could disagree about the config.
+2. Gram identity -> `state._pairwise` (cdist). Same cancellation lesson as elsewhere.
+3. **Levina-Bickel MLE ran on squared distances, halving the estimate.**
+   `log(r_k^2/r_j^2) = 2 log(r_k/r_j)`. A 5-dim gaussian in R^20 reads **2.50 as
+   written, 4.99 fixed.** Asserted in `demo()`.
+4. Fixed `k=15` builds a *complete* graph on <=16 points, whose Laplacian gap is 1.0
+   whatever the geometry - two tight caps of 7 both read 1.0000. Capped at `n//3`.
+5. Subsample caps 2048/4096 -> 512; a 2048-cubed eigendecomposition is tens of seconds.
+
+### 7 of 13 vitals dropped as dead weight
+
+Kept, each with a named consumer: `log_n` -> window, `log_d` + `aspect` -> linear_dim
+cap, `intrinsic_dim` -> linear_dim floor, `spectral_gap` -> confidence contradiction
+check, `nan_fraction` -> scrubbing.
+
+Dropped: `dist_mean`, `dist_std`, `dist_p95_p5` (the plateau carries the same
+information, localized at the radius that matters), `knee_clusters` (no knob consumes
+it, costliest vital, unreproducible without pinning sklearn), `curvature_proxy`
+(sigmoid has no curvature knob), `small_world` (no knob reads graph topology),
+`sparsity` (reads 0.000000 on S2 and Lorenz - every sigmoid matrix is dense float).
+
+No `PolicyNet`: an untrained randomly-initialised network that then samples from its
+own softmax is worse than a documented heuristic and is not reproducible.
+
+### Vitals runtime (calibration path only; encode is 0.9 ms)
+
+| trajectory | vitals | plateau |
+|---|---|---|
+| s2_rips 400x63 | 41.8 ms | 7.9 ms |
+| lorenz 1200x24 | 86.8 ms | 7.4 ms |
+| distilgpt2-shaped 512x768 | 129.4 ms | 31.4 ms |
+| long stream 20000x64 | 92.3 ms | 78.5 ms |
+
+Dominated by `eigvalsh` on a dense 512x512 Laplacian (84 ms). A partial LAPACK range
+solve measured *slower* (132 against 110 ms).
+
+
+---
+
 ## Reproducing
 
 ```bash
-python -m pytest tests/ -q                 # 207 checks
+python -m pytest tests/ -q                 # 322 checks
 python -m sigmoid.vision.encode            # vision latency + Rips comparison
 python -m sigmoid.realtime                 # safety p50/p99/max, watchdog
-python -m sigmoid.telemetry                # overhead + bit-exact replay
+python -m sigmoid.telemetry                # overhead, bit-exact replay, Chebyshev
+python -m sigmoid.deploy                   # quantization table + OTA proofs
+python -m sigmoid.governor                 # config selection accuracy
+python -m sigmoid.viz                      # renders a dashboard, prints the path
+python -m sigmoid.foresight                # IDM, interlock, affordances
 python examples/s2_rips_corpus.py
 python examples/contact_world.py
 python examples/falsify_condition.py

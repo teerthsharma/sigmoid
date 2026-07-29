@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["betti_from_euler", "euler_characteristic", "euler_curve", "to_gray"]
+__all__ = ["betti1_bound", "betti_from_euler", "euler_characteristic", "euler_curve", "to_gray"]
 
 
 def to_gray(image: np.ndarray) -> np.ndarray:
@@ -80,6 +80,21 @@ def euler_curve(image: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
     return np.asarray([euler_characteristic(img <= t) for t in ts], dtype=np.float64)
 
 
+def betti1_bound(n_foreground: int, b0: int) -> int:
+    """Upper bound on an estimated b1, from AETHER `AetherBetti.lean`.
+
+        b1_hat <= b0 + (n - 3)
+
+    A cycle needs vertices, so on `n` foreground pixels the number of independent
+    loops an estimator may legitimately claim is capped. Used by
+    `betti_from_euler` to separate "0 because there are no holes" from "0 because
+    the estimate left its valid range" -- a distinction a bare clip destroys.
+    """
+    n = max(0, int(n_foreground))
+    b = max(0, int(b0))
+    return max(0, b + max(0, n - 3))
+
+
 def betti_from_euler(mask: np.ndarray) -> tuple[int, int]:
     """(b0, b1) for a 2D binary mask.
 
@@ -89,8 +104,14 @@ def betti_from_euler(mask: np.ndarray) -> tuple[int, int]:
     specifies -- background is padded so the outer region is one component and
     enclosed holes are counted separately.
 
-    b1 is clipped at 0: a mask touching the border can produce chi > b0 under
-    this convention, and a negative hole count is meaningless to a caller.
+    b1 is bracketed rather than merely clipped. A mask touching the border can
+    produce chi > b0 under this convention, which would make `b0 - chi` negative,
+    and a negative hole count is meaningless. Clipping at 0 alone hides *how far*
+    out of range the estimate went, so the AETHER bound `b1 <= b0 + (n - 3)`
+    supplies the other side (`betti1_bound`). An estimate outside `[0, bound]` is
+    a signal that the convention was violated -- a mask whose enclosed region
+    touches the padded border, typically -- not a hole count to be trusted, and
+    clamping silently would present it as one.
     """
     from scipy.ndimage import label
 
@@ -99,7 +120,8 @@ def betti_from_euler(mask: np.ndarray) -> tuple[int, int]:
         return 0, 0
     structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=bool)  # 4-conn
     _, b0 = label(m, structure=structure)
-    return int(b0), max(0, int(b0) - euler_characteristic(m))
+    raw = int(b0) - euler_characteristic(m)
+    return int(b0), int(np.clip(raw, 0, betti1_bound(int(m.sum()), int(b0))))
 
 
 def _disk(size: int, cx: float, cy: float, r: float) -> np.ndarray:
@@ -145,6 +167,22 @@ def demo() -> None:
 
     curve = euler_curve(np.linspace(0, 1, n * n).reshape(n, n), np.linspace(0, 1, 8))
     assert curve.shape == (8,) and np.all(np.isfinite(curve))
+
+    # every estimate must sit inside the AETHER bound, border cases included
+    for name, mask in (
+        ("disk", solid),
+        ("annulus", annulus),
+        ("two disks", two),
+        ("two holes", two_holes),
+        ("border-touching", np.mgrid[0:n, 0:n][1] < 20),
+        ("full frame", np.ones((n, n), dtype=bool)),
+        ("single pixel", np.eye(n, dtype=bool)[:1].repeat(1, 0) & (np.arange(n) == 0)),
+    ):
+        b0, b1 = betti_from_euler(mask)
+        ub = betti1_bound(int(np.asarray(mask).sum()), b0)
+        assert 0 <= b1 <= ub, f"{name}: b1={b1} outside [0, {ub}]"
+    assert betti1_bound(10, 1) == 8 and betti1_bound(2, 1) == 1
+    print("  b1 inside the AETHER bound b0 + (n-3) on 7 masks incl. border cases")
     print("demo ok")
 
 

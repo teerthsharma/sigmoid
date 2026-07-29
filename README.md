@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square&color=00aaff" alt="MIT"></a>
-  <a href="#12-validation"><img src="https://img.shields.io/badge/tests-207%20passing-brightgreen?style=flat-square" alt="Tests"></a>
+  <a href="#12-validation"><img src="https://img.shields.io/badge/tests-322%20passing-brightgreen?style=flat-square" alt="Tests"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/core%20deps-numpy%20%2B%20scipy-lightgrey?style=flat-square" alt="Deps"></a>
   <a href="#9-when-topology-pays"><img src="https://img.shields.io/badge/claims-falsification--tested-orange?style=flat-square" alt="Falsification tested"></a>
   <a href="SIGMOID.md"><img src="https://img.shields.io/badge/negatives-published-red?style=flat-square" alt="Negatives published"></a>
@@ -98,6 +98,9 @@ out-of-distribution detection, inference engines
 | [19](#19-topological-vision) | Topological vision |
 | [20](#20-real-time-execution) | Real-time execution |
 | [21](#21-telemetry-and-deterministic-replay) | Telemetry and deterministic replay |
+| [22](#22-proven-bounds-instead-of-measured-ones) | Proven bounds instead of measured ones |
+| [23](#23-deployment-and-quantization) | Deployment and quantization |
+| [24](#24-automatic-configuration) | Automatic configuration |
 
 ---
 
@@ -197,6 +200,10 @@ tree; H₁ requires a Rips complex and is calibration-only.
 | [`robot.py`](sigmoid/robot.py) | agent ↔ world-model bridge, refusal as a value |
 | [`providers/`](sigmoid/providers/) | **Integration API** — 12 LLM backends, env-only keys |
 | [`hooks.py`](sigmoid/hooks.py) | hook points with veto and failure isolation |
+| [`foresight.py`](sigmoid/foresight.py) | action-conditioned rollout, inverse dynamics, kinematic interlock |
+| [`deploy.py`](sigmoid/deploy.py) | quantization, hardware probe, atomic OTA weight swap |
+| [`governor.py`](sigmoid/governor.py) | automatic config selection from topological vitals |
+| [`viz.py`](sigmoid/viz.py) | self-contained HTML/SVG rollout, heatmap, compute graph |
 | [`cli.py`](sigmoid/cli.py) | `python -m sigmoid fit \| roll \| bench` |
 
 Nested directories are **integration APIs**, not package nesting. The core
@@ -579,7 +586,7 @@ tie-heavy families.
 ## 12. Validation
 
 ```bash
-python -m pytest tests/ -q                  # 207 checks; each file also runs standalone
+python -m pytest tests/ -q                  # 322 checks; each file also runs standalone
 python -m sigmoid.triton.schedule           # salience parity self-check
 python -m sigmoid.mujoco.island             # beta_0 == island count, 12/12
 python -m sigmoid.mujoco.corpus             # corpus is topologically non-static
@@ -914,6 +921,100 @@ captured, and that uncaptured state is a candidate cause of the incident. An
 Nondeterminism sources pinned are listed in the module docstring; GPU kernels are
 named as the one that cannot be, since cuBLAS split-k reduction order varies
 across launches.
+
+---
+
+## 22. Proven bounds instead of measured ones
+
+Everything above is justified by measurement. Measurement is the right standard for
+typical behaviour and the wrong one for a worst case, and a robot needs the second
+kind. Four primitives from my AETHER runtime work (Lean 4 verified, 710 tests, 0
+`sorry`) were absorbed into the functions they guard — not a module of their own.
+
+| primitive | lives in | outcome |
+|---|---|---|
+| Chebyshev eviction | `telemetry.chebyshev_keep` | **works** — ceiling `n/k²` held on gaussian, Cauchy and constant scores |
+| Lyapunov gain | `operator.LyapunovGain` | **works** — arrests divergence without clipping the operator |
+| Betti bound | `vision.betti1_bound` | **works** — b1 bracketed in `[0, b0+(n−3)]` |
+| Cauchy-Schwarz pruning | attempted in `triton/schedule.py` | **does not transfer** |
+
+**Lyapunov is the interesting one**, because it replaces a trade this repo previously
+had to accept. `rho_max` buys a Banach bound by overwriting the measured dynamics and
+it costs accuracy (0.067 → 0.317 on Lorenz). A PD correction with `α + β/dt < 1`
+arrests divergence while leaving the operator reporting the ρ the data actually showed:
+
+| expansive operator, ρ = 1.600, 40 steps | ‖z‖ start | ‖z‖ end |
+|---|---|---|
+| plain rollout | 2.98 | 2.72e+08 |
+| `stabilized_rollout` | 1.49 | **3.30e-03** |
+
+**Cauchy-Schwarz did not transfer, and that is reported rather than buried.** The bound
+is correct and never binds: pruning a 64-key block at ε=1e-3 needs its ceiling 11.1
+nats below the global max, and attention logits at scale 1/√64 span roughly ±3. Whole-
+key `‖q‖‖k‖` pruned **0/480 blocks**; even very tight clusters bottom out at 0.47, i.e.
+calling 47% of the softmax mass negligible. Same failure shape as the scalar Banach
+certificate — true, and vacuous. The dead code was removed and the finding recorded in
+`schedule.py` so it is not retried.
+
+## 23. Deployment and quantization
+
+The world model is a dense matrix, so quantization is measurable here with no ML
+framework. Verdict rule is a property of the model rather than a chosen tolerance:
+**usable == added rollout error ≤ the operator's own fitted residual.**
+
+| precision | bytes | × | 16-step rmse | p50 µs | verdict |
+|---|---|---|---|---|---|
+| fp64 | 8448 | 1.00 | — | 0.70 | reference |
+| fp32 | 4224 | 2.00 | 2.32e-09 | 0.80 | usable |
+| fp16 | 2112 | 4.00 | 1.98e-05 | **3.10** | usable |
+| int8 per-row | 1184 | 7.14 | 6.13e-04 | 0.80 | usable |
+
+**Quantization buys bytes, not speed.** Nothing beats fp64 in numpy; fp16 is **4.4×
+slower** because there is no fp16 BLAS path. So the tier map is the *inverse* of the
+obvious one — contact-rich gets fp32, free-space gets int8 — because precision follows
+accuracy tolerance, not deadline.
+
+Two findings worth stating. My own premise about per-row scaling was **false** for a
+spectrally-projected operator: the real Lorenz `W_` spans only 2.54× and a global scale
+destroys nothing. It is true for raw-units robot state, where global zeroes **16/32
+rows**. And 31 of that operator's 52 rows are exactly zero (the block-diagonal fit
+leaves the psi→u quadrant empty), so unguarded per-row scaling writes **NaN into 60% of
+the matrix** — a NaN operator emits a NaN action a robot executes.
+
+`nvidia-smi` costs **32 ms**, above the 20 ms contact-rich budget: reading GPU
+temperature inline *is itself* the deadline miss.
+
+OTA uses `os.replace` — 12 swaps under a live reader, **0 torn reads** — with a SHA-256
+manifest re-checked at commit rather than trusted from stage. On Windows, `os.replace`
+onto a path another handle holds open raises `PermissionError`; a continuous reader
+blocked **300 of 300** swaps, handled with bounded retry and a named `StagingError`.
+
+## 24. Automatic configuration
+
+`SigmoidGovernor` picks the settings whose wrong values fail silently. Accuracy **8 of
+9**, and the miss is named: a 22-node corpus takes `entity_dim=2` over 3, because `3n`
+is divisible by 2 for even `n` and the reshape keeps cluster structure with 1.5× the
+points. Odd node counts are all correct.
+
+Three criteria were measured and rejected before this one, including the one I had
+recommended in [AGENDA.md](AGENDA.md):
+
+| criterion | accuracy |
+|---|---|
+| `psi → next state` *(my suggestion)* | ridge-dependent; no single value works across three systems |
+| held-out rollout NRMSE | **1 of 5** |
+| `select_cloud` as-is | **1 of 3** |
+| **H0 plateau vs point-count-matched control** | **8 of 9** |
+
+**The recommendation loses to the default on S2** under `compare()` — 0 win, 3 loss,
+reported as measured. Both arms sit above nrmse 1.0, worse than predicting zero, so
+`compare()` is not measuring prediction on that corpus. On the metric it does measure,
+`psi → held-out island count`: recommended **0.7628**, default **−2.9272**.
+
+It also found a genuine math bug in the source: the Levina-Bickel intrinsic-dimension
+MLE ran on *squared* distances, and `log(r_k²/r_j²) = 2·log(r_k/r_j)`, so it **halved
+every estimate** — a 5-dim gaussian in R²⁰ reads 2.50 as written, 4.99 fixed. Seven of
+the thirteen vitals were then dropped as dead weight, each with a stated reason.
 
 ---
 
