@@ -29,7 +29,8 @@ First public release.
   bit-identically at 13×, plus `IncrementalSalience` for decode at 8.6–21.7×.
 - **Multi-body** — Hamilton-tensor coupling with rank-R truncation.
 - **Bench** — matched-budget ablations, promotion gates that report failures.
-- Nine runnable studies in `examples/`, 57 tests, GitHub Pages documentation.
+- Nine runnable studies in `examples/`, 57 tests, and a self-contained
+  `docs/index.html` walkthrough (no build step, no external assets).
 
 ### Fixed
 - Gram-identity distance cancellation in `h0_barcode` silently merged distinct
