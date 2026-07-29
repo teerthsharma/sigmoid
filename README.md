@@ -134,16 +134,16 @@ tree; H₁ requires a Rips complex and is calibration-only.
 
 | Module | Role |
 |---|---|
-| [`state.py`](sigmoid/state.py) | Σ — barcodes, Hilbert embedding, robust standardization, decoder, automatic cloud/scale selection |
-| [`operator.py`](sigmoid/operator.py) | T — ridge fit, spectral projection, Banach fixed point, scalar and directional certificates |
-| [`sheaf.py`](sigmoid/sheaf.py) | The grounding gate — restriction map, support term, spectral-entropy stalk |
-| [`engine.py`](sigmoid/engine.py) | `SigmoidWorldModel` — fit / observe / imagine / save / load |
-| [`control.py`](sigmoid/control.py) | CEM-MPC planner, topological costs, principled refusal |
-| [`schedule.py`](sigmoid/schedule.py) | Causal CSR block schedules, batch and incremental |
-| [`nbody.py`](sigmoid/nbody.py) | Hamilton-tensor multi-entity coupling with rank-R truncation |
-| [`adapters.py`](sigmoid/adapters.py) | Capture from HuggingFace models, torch modules, callables |
-| [`bench.py`](sigmoid/bench.py) | Matched-budget ablations and promotion gates |
-| [`cli.py`](sigmoid/cli.py) | `python -m sigmoid fit \| roll \| bench` |
+| [`state.py`](src/sigmoid/state.py) | Σ — barcodes, Hilbert embedding, robust standardization, decoder, automatic cloud/scale selection |
+| [`operator.py`](src/sigmoid/operator.py) | T — ridge fit, spectral projection, Banach fixed point, scalar and directional certificates |
+| [`sheaf.py`](src/sigmoid/sheaf.py) | The grounding gate — restriction map, support term, spectral-entropy stalk |
+| [`engine.py`](src/sigmoid/engine.py) | `SigmoidWorldModel` — fit / observe / imagine / save / load |
+| [`control.py`](src/sigmoid/control.py) | CEM-MPC planner, topological costs, principled refusal |
+| [`schedule.py`](src/sigmoid/schedule.py) | Causal CSR block schedules, batch and incremental |
+| [`nbody.py`](src/sigmoid/nbody.py) | Hamilton-tensor multi-entity coupling with rank-R truncation |
+| [`adapters.py`](src/sigmoid/adapters.py) | Capture from HuggingFace models, torch modules, callables |
+| [`bench.py`](src/sigmoid/bench.py) | Matched-budget ablations and promotion gates |
+| [`cli.py`](src/sigmoid/cli.py) | `python -m sigmoid fit \| roll \| bench` |
 
 ---
 
