@@ -24,7 +24,7 @@
 
 ## Abstract
 
-We present **Sigmoid**, an inference engine that converts an arbitrary trained
+**Sigmoid** is an inference engine that converts an arbitrary trained
 model into a world model without modifying, retraining, or differentiating
 through it. Given any producer of hidden activations — a transformer, a policy
 network, a simulator, a bare callable — Sigmoid encodes each window of
@@ -41,7 +41,7 @@ at all.
 The construction is a transplant. The pattern `barcode → Hilbert embedding →
 least-squares operator → Banach fixed point` was developed for electromagnetic
 cavity coupling in **Faraday** and extended to N bodies in the **Hamilton
-Tensor**; here it is carried onto model activations. We validate on chaotic
+Tensor**; here it is carried onto model activations. It is validated on chaotic
 attractors, an S²–Vietoris–Rips entity corpus derived from
 [`google-deepmind/mujoco#3396`](https://github.com/google-deepmind/mujoco/pull/3396),
 granular contact physics, closed-loop multi-robot control, and the residual
@@ -53,8 +53,8 @@ merged Triton kernel salience of
 [`triton-lang/kernels#22`](https://github.com/triton-lang/kernels/pull/22)
 **bit-identically at 13×** the speed.
 
-We further report, in full, four claims of our own that adversarial review
-falsified, and the two-clause condition that replaced our original hypothesis.
+Four of my own claims that adversarial review falsified are reported in full,
+along with the two-clause condition that replaced my original hypothesis.
 
 **Keywords:** world models, persistent homology, topological data analysis,
 Banach fixed-point theorem, Hilbert series, coupling operators, sheaf
@@ -80,7 +80,7 @@ out-of-distribution detection, inference engines
 | [11](#11-sparse-attention-schedules) | Sparse attention schedules |
 | [12](#12-validation) | Validation |
 | [13](#13-installation-and-use) | Installation and use |
-| [14](#14-what-we-got-wrong) | What we got wrong |
+| [14](#14-what-i-got-wrong) | What I got wrong |
 | [15](#15-provenance) | Provenance |
 
 ---
@@ -424,7 +424,7 @@ separates is token identity.
 
 ## 9. When topology pays
 
-Our original hypothesis was falsified twice. The condition that survived has two
+My original hypothesis was falsified twice. The condition that survived has two
 clauses, because *representing* structure and *predicting* with it are different
 problems:
 
@@ -543,7 +543,7 @@ than dropping losing arms**:
 | `carry` | Does the model beat copying the present? |
 | `mean` | Does it beat predicting the dataset average? |
 
-Nine runnable studies, two of which falsified this project's own claims:
+Nine runnable studies, two of which falsified my own earlier claims:
 
 ```bash
 python examples/s2_rips_corpus.py        # entity dynamics: topology wins
@@ -589,7 +589,7 @@ python -m sigmoid bench traj.npy
 
 ---
 
-## 14. What we got wrong
+## 14. What I got wrong
 
 Published because an engine that only reports its wins cannot be trusted with
 the ones it claims. Four previously-shipped claims were falsified under

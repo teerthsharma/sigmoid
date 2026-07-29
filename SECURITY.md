@@ -8,7 +8,7 @@
 
 ## Reporting a vulnerability
 
-Email **teerthsharma@outlook.com**. Please do not open a public issue for
+Email **teerths57@gmail.com**. Please do not open a public issue for
 security matters. Expect an acknowledgement within 72 hours.
 
 ## Threat model
