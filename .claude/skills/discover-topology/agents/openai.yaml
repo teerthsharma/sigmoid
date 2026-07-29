@@ -1,4 +1,0 @@
-interface:
-  display_name: "Discover Topology"
-  short_description: "Topology-first research workflows for ML and systems speedups."
-  default_prompt: "Use topology to turn a performance idea into falsifiable hypotheses, implementations, and benchmark gates."
