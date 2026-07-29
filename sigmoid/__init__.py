@@ -19,11 +19,6 @@ from .control import Plan, TopologicalMPC, beta0_cost, target_cost
 from .engine import Rollout, SigmoidConfig, SigmoidWorldModel, wrap
 from .nbody import MultiBodyCoupling
 from .operator import CouplingOperator, RolloutCertificate
-from .schedule import (
-    block_centroids,
-    build_topology_block_schedule,
-    zero_dim_persistence_salience,
-)
 from .sheaf import GateReading, SheafGate
 from .state import (
     Barcode,
@@ -33,6 +28,12 @@ from .state import (
     h0_barcode,
     h1_barcode,
     hilbert_coefficients,
+)
+from .triton import (
+    IncrementalSalience,
+    block_centroids,
+    build_topology_block_schedule,
+    zero_dim_persistence_salience,
 )
 
 __version__ = "0.1.0"
@@ -50,6 +51,7 @@ __all__ = [
     "GateReading",
     "SheafGate",
     "MultiBodyCoupling",
+    "IncrementalSalience",
     "block_centroids",
     "build_topology_block_schedule",
     "zero_dim_persistence_salience",

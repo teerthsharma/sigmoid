@@ -13,7 +13,6 @@
 </p>
 
 <p align="center">
-  <a href=".github/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/teerthsharma/sigmoid/ci.yml?branch=main&label=CI&style=flat-square" alt="CI"></a>
   <a href="https://teerthsharma.github.io/sigmoid/"><img src="https://img.shields.io/badge/docs-github.io-blue?style=flat-square" alt="Docs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square&color=00aaff" alt="MIT"></a>
   <a href="#12-validation"><img src="https://img.shields.io/badge/tests-57%20passing-brightgreen?style=flat-square" alt="Tests"></a>
@@ -134,16 +133,30 @@ tree; H₁ requires a Rips complex and is calibration-only.
 
 | Module | Role |
 |---|---|
-| [`state.py`](src/sigmoid/state.py) | Σ — barcodes, Hilbert embedding, robust standardization, decoder, automatic cloud/scale selection |
-| [`operator.py`](src/sigmoid/operator.py) | T — ridge fit, spectral projection, Banach fixed point, scalar and directional certificates |
-| [`sheaf.py`](src/sigmoid/sheaf.py) | The grounding gate — restriction map, support term, spectral-entropy stalk |
-| [`engine.py`](src/sigmoid/engine.py) | `SigmoidWorldModel` — fit / observe / imagine / save / load |
-| [`control.py`](src/sigmoid/control.py) | CEM-MPC planner, topological costs, principled refusal |
-| [`schedule.py`](src/sigmoid/schedule.py) | Causal CSR block schedules, batch and incremental |
-| [`nbody.py`](src/sigmoid/nbody.py) | Hamilton-tensor multi-entity coupling with rank-R truncation |
-| [`adapters.py`](src/sigmoid/adapters.py) | Capture from HuggingFace models, torch modules, callables |
-| [`bench.py`](src/sigmoid/bench.py) | Matched-budget ablations and promotion gates |
-| [`cli.py`](src/sigmoid/cli.py) | `python -m sigmoid fit \| roll \| bench` |
+| [`state.py`](sigmoid/state.py) | Σ — barcodes, Hilbert embedding, robust standardization, decoder, automatic cloud/scale selection |
+| [`operator.py`](sigmoid/operator.py) | T — ridge fit, spectral projection, Banach fixed point, scalar and directional certificates |
+| [`sheaf.py`](sigmoid/sheaf.py) | The grounding gate — restriction map, support term, spectral-entropy stalk |
+| [`engine.py`](sigmoid/engine.py) | `SigmoidWorldModel` — fit / observe / imagine / save / load |
+| [`control.py`](sigmoid/control.py) | CEM-MPC planner, topological costs, principled refusal |
+| [`triton/`](sigmoid/triton/) | **Integration API** — causal CSR block schedules for `kernels#22`, batch and incremental |
+| [`mujoco/`](sigmoid/mujoco/) | **Integration API** — `mj_island` partition semantics and the `#3396` S²-Rips corpus |
+| [`nbody.py`](sigmoid/nbody.py) | Hamilton-tensor multi-entity coupling with rank-R truncation |
+| [`adapters.py`](sigmoid/adapters.py) | Capture from HuggingFace models, torch modules, callables |
+| [`bench.py`](sigmoid/bench.py) | Matched-budget ablations and promotion gates |
+| [`cli.py`](sigmoid/cli.py) | `python -m sigmoid fit \| roll \| bench` |
+
+Nested directories are **integration APIs**, not package nesting. The core
+engine sits flat at the top of `sigmoid/`; each subpackage bridges to one
+external system, and neither imports that system's runtime:
+
+```python
+from sigmoid.mujoco import island_count, make_corpus   # partition semantics
+from sigmoid.triton import build_topology_block_schedule, IncrementalSalience
+```
+
+`sigmoid.mujoco` needs no `mujoco` install and `sigmoid.triton` needs no
+`triton`. They carry the *semantics* — island partitions, block salience — in
+numpy, which is what makes exact agreement with each upstream testable offline.
 
 ---
 
@@ -487,7 +500,7 @@ one. The fix is an uncertainty-weighted cost, not tuning.
 The merged kernel
 [`triton-lang/kernels#22`](https://github.com/triton-lang/kernels/pull/22)
 builds a causal CSR block schedule from a 0D-persistence salience over key-block
-centroids — the same single-linkage object §3.2 computes. `schedule.py` is a
+centroids — the same single-linkage object §3.2 computes. `sigmoid.triton` is a
 drop-in replacement.
 
 The reference enumerates and sorts all `n(n−1)/2` centroid pairs before running
@@ -512,8 +525,14 @@ tie-heavy families.
 ## 12. Validation
 
 ```bash
-python -m pytest tests/ -q          # 57 checks; each file also runs standalone
+python -m pytest tests/ -q                  # 57 checks; each file also runs standalone
+python -m sigmoid.triton.schedule           # salience parity self-check
+python -m sigmoid.mujoco.island             # beta_0 == island count, 12/12
+python -m sigmoid.mujoco.corpus             # corpus is topologically non-static
 ```
+
+Each integration API carries its own runnable self-check, so agreement with the
+upstream it mirrors is verified on import path, not asserted in prose.
 
 `bench.py` runs every arm at matched budget and **reports failed gates rather
 than dropping losing arms**:

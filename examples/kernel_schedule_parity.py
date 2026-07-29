@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 DEFAULT_KERNEL = Path(
     "C:/Users/seal/Documents/GitHub/kernels/kernels/topology_sparse_attention.py"
@@ -67,7 +67,7 @@ def bench(fn, *args, warmup: int = 2, reps: int = 5) -> float:
 def main() -> int:
     import torch
 
-    from sigmoid.schedule import (
+    from sigmoid.triton import (
         build_topology_block_schedule,
         zero_dim_persistence_salience,
     )

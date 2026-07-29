@@ -13,9 +13,9 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sigmoid.schedule import (
+from sigmoid.triton import (
     IncrementalSalience,
     build_topology_block_schedule,
     zero_dim_persistence_salience,

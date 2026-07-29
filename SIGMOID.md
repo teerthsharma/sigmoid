@@ -706,7 +706,7 @@ python examples/robot_control.py            # closed-loop control, 4 robots
 python examples/llm_worldmodel.py           # distilgpt2 study, offline
 python examples/layer_sweep.py              # is the LLM null a layer artifact?
 python examples/kernel_schedule_parity.py   # parity vs triton-lang/kernels#22
-python -m sigmoid.schedule                  # salience self-check
+python -m sigmoid.triton.schedule                  # salience self-check
 python -m sigmoid bench traj.npy            # ablation + gates on your own capture
 ```
 

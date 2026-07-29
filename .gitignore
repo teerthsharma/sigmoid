@@ -11,3 +11,4 @@ venv/
 !tests/**/*.npz
 .donotcommit/
 .DS_Store
+.benchmarks/
