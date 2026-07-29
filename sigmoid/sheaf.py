@@ -32,8 +32,25 @@ The second term is plain support checking: a whitened Mahalanobis distance to
 the calibration state cloud. Off-support states are unreliable even when
 self-consistent.
 
-Both are calibrated to quantiles of the *real* trajectory, so the threshold is
-in units of "how weird would this have been in calibration", not raw distance.
+Third stalk: spectral entropy (AGENDA R8). Calibrated on markdown prose from
+distilgpt2 activations, the two terms above scored held-out prose 0.671 (0/9
+fire), symbol soup 1.385 (4/9), one token repeated 14.596 (5/5) -- and uniform
+random tokens 0.513 (0/5), *lower than real prose*. Random input produces
+diffuse, high-entropy activations whose window averages sit near the centroid of
+the standardized state space, so both the residual and the Mahalanobis distance
+stay small. The two terms see structural degeneracy, not noise.
+
+So add a third local section on the same window: the effective rank
+exp(-sum p log p) over the window's normalized squared singular values. Noise has
+anomalously HIGH effective rank, repetition anomalously LOW, and prose sits in
+between -- one statistic, both tails, if the deviation is taken two-sided.
+Scored as |log er - median(log er_calib)| over the calibration quantile of that
+same deviation, so it lands in the same "how weird would this have been in
+calibration" units as the other two.
+
+The window is not recoverable from an encoded state z, so the caller supplies
+the statistic (`effective_rank(encoder.normalize(window))`). Supply nothing and
+the term is inert -- the gate is exactly the two-term gate it was before.
 """
 
 from __future__ import annotations
@@ -42,7 +59,41 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-__all__ = ["GateReading", "SheafGate"]
+__all__ = ["GateReading", "SheafGate", "effective_rank"]
+
+
+def effective_rank(window: np.ndarray) -> float:
+    """exp(spectral entropy) of a (window, D) block: how many directions it uses.
+
+    Ranges from 1.0 (every row the same, i.e. a repeated token) to min(window, D)
+    (isotropic noise), with structured signal in between.
+
+    Deliberately NOT column-centered. Centering looks like the right thing --
+    remove the offset, keep the shape -- but it deletes the low tail: a repeated
+    pattern plus any jitter centers to *pure jitter*, so its rank becomes the
+    rank of the noise floor. Measured on synthetic windows (24x16, latent dim 4),
+    mean effective rank centered vs uncentered:
+
+                              centered   uncentered
+        smooth signal             2.59         2.44
+        repeat + 1e-3 jitter     11.24         1.00
+        isotropic noise          11.17        11.36
+
+    Centered, repetition and noise are the same number and the gate is blind to
+    the tail it already caught. The input is standardized activations, where the
+    offset is itself a calibrated quantity, so leaving it in is sound.
+    """
+    W = np.asarray(window, dtype=np.float64)
+    if W.ndim != 2 or W.shape[0] < 2:
+        raise ValueError("window must be (window, D) with window >= 2")
+    s = np.linalg.svd(W, compute_uv=False)
+    p = s**2
+    total = p.sum()
+    if total <= 1e-30:  # a literally constant window: one direction, degenerately
+        return 1.0
+    p = p / total
+    p = p[p > 1e-12]
+    return float(np.exp(-(p * np.log(p)).sum()))
 
 
 @dataclass(frozen=True)
@@ -56,10 +107,15 @@ class GateReading:
 
     manifold_score: float
     score: float
-    """max of the two scores. >= 1.0 means ground now."""
+    """max of the scores. >= 1.0 means ground now."""
 
     fire: bool
     reason: str
+
+    # third stalk; zero when the caller supplied no effective rank, which keeps
+    # the reading identical to the two-term gate.
+    effective_rank: float = 0.0
+    rank_score: float = 0.0
 
 
 @dataclass
@@ -76,11 +132,24 @@ class SheafGate:
     inv_std_: np.ndarray | None = field(default=None, repr=False)
     sheaf_threshold_: float = 0.0
     manifold_threshold_: float = 0.0
+    rank_center_: float | None = None
+    """median log effective rank in calibration. None == the stalk is not fitted."""
+
+    rank_threshold_: float = 0.0
     topo_dim: int = 0
     fitted: bool = False
 
-    def fit(self, states: np.ndarray, topo_dim: int) -> "SheafGate":
-        """Learn R and the support model from calibration states (N, state_dim)."""
+    def fit(
+        self,
+        states: np.ndarray,
+        topo_dim: int,
+        effective_ranks: np.ndarray | None = None,
+    ) -> "SheafGate":
+        """Learn R and the support model from calibration states (N, state_dim).
+
+        `effective_ranks` is the optional third stalk: one `effective_rank(W)`
+        per state, in the same order. Omit it and the gate is the two-term gate.
+        """
         Z = np.asarray(states, dtype=np.float64)
         if Z.ndim != 2 or Z.shape[0] < 2:
             raise ValueError("states must be (N, state_dim) with N >= 2")
@@ -106,11 +175,30 @@ class SheafGate:
         if self.manifold_threshold_ <= 1e-12:
             self.manifold_threshold_ = 1e-12
 
+        # spectral stalk, two-sided: both tails are failures, so calibrate on the
+        # absolute log deviation from the calibration centre. Log because
+        # effective rank is a multiplicative scale (1 -> 4 is the same distance
+        # as 4 -> 16), median because a handful of degenerate calibration
+        # windows must not drag the centre.
+        self.rank_center_, self.rank_threshold_ = None, 0.0
+        if effective_ranks is not None:
+            r = np.asarray(effective_ranks, dtype=np.float64).reshape(-1)
+            if r.shape[0] != Z.shape[0]:
+                raise ValueError(
+                    f"effective_ranks has {r.shape[0]} entries for {Z.shape[0]} states"
+                )
+            r = np.log(np.maximum(r, 1e-12))
+            self.rank_center_ = float(np.median(r))
+            deviation = np.abs(r - self.rank_center_)
+            self.rank_threshold_ = max(
+                float(np.quantile(deviation, self.quantile)), 1e-12
+            )
+
         self.fitted = True
         return self
 
-    def read(self, z: np.ndarray) -> GateReading:
-        """Evaluate one imagined state."""
+    def read(self, z: np.ndarray, effective_rank: float | None = None) -> GateReading:
+        """Evaluate one imagined state, optionally with its window's effective rank."""
         if not self.fitted:
             raise RuntimeError("SheafGate.fit must be called before use")
         z = np.asarray(z, dtype=np.float64).reshape(-1)
@@ -122,10 +210,24 @@ class SheafGate:
 
         sheaf_score = sheaf_residual / self.sheaf_threshold_
         manifold_score = manifold_distance / self.manifold_threshold_
-        score = max(sheaf_score, manifold_score)
+
+        # inert unless both sides supplied a rank: an unfitted stalk must not
+        # fire, and a fitted one must not judge a state it was given no rank for.
+        rank, rank_score, log_rank = 0.0, 0.0, 0.0
+        if effective_rank is not None and self.rank_center_ is not None:
+            rank = float(effective_rank)
+            log_rank = float(np.log(max(rank, 1e-12)))
+            rank_score = abs(log_rank - self.rank_center_) / self.rank_threshold_
+
+        score = max(sheaf_score, manifold_score, rank_score)
         reason = "ok"
         if score >= 1.0:
-            reason = "sheaf_inconsistent" if sheaf_score >= manifold_score else "off_manifold"
+            if sheaf_score >= manifold_score and sheaf_score >= rank_score:
+                reason = "sheaf_inconsistent"
+            elif manifold_score >= rank_score:
+                reason = "off_manifold"
+            else:
+                reason = "rank_inflated" if log_rank > self.rank_center_ else "rank_collapsed"
         return GateReading(
             sheaf_residual=sheaf_residual,
             manifold_distance=manifold_distance,
@@ -134,6 +236,8 @@ class SheafGate:
             score=score,
             fire=bool(score >= 1.0),
             reason=reason,
+            effective_rank=rank,
+            rank_score=rank_score,
         )
 
     def state_dict(self) -> dict:
@@ -145,6 +249,8 @@ class SheafGate:
             "inv_std_": self.inv_std_,
             "sheaf_threshold_": self.sheaf_threshold_,
             "manifold_threshold_": self.manifold_threshold_,
+            "rank_center_": self.rank_center_,
+            "rank_threshold_": self.rank_threshold_,
             "topo_dim": self.topo_dim,
         }
 
@@ -156,6 +262,9 @@ class SheafGate:
         gate.inv_std_ = payload["inv_std_"]
         gate.sheaf_threshold_ = float(payload["sheaf_threshold_"])
         gate.manifold_threshold_ = float(payload["manifold_threshold_"])
+        center = payload.get("rank_center_")  # absent in gates saved before R8
+        gate.rank_center_ = None if center is None else float(center)
+        gate.rank_threshold_ = float(payload.get("rank_threshold_") or 0.0)
         gate.topo_dim = int(payload["topo_dim"])
         gate.fitted = True
         return gate

@@ -38,10 +38,13 @@ both.
 persistent-homology features and re-run them across the (cloud, scale) matrix.
 Cheap, unglamorous, high information. *Solo researcher. Weeks, not months.*
 
-**R2 — Make the choice automatic.** Both bugs are detectable without labels: fit
-psi under each of the four combinations and keep whichever has the highest
-self-predictability (measured here: 0.762 for a real signal). A `cloud="auto"`
-mode is a small change and would have caught both bugs on the first run.
+**R2 — Make the choice automatic.** Both bugs are detectable without labels.
+*Shipped (§6b), with one caveat found by R5 after the fact:* raw
+self-predictability is the wrong criterion — it reads 0.762 on the distilgpt2
+encoder, exactly the case it should reject, because overlapping windows make any
+temporal psi its own successor. The shipped version subtracts a shuffled-order
+floor, which fixes the overlap artifact; the stronger criterion R5 recommends is
+`psi → next state`, one ridge fit, not yet implemented.
 
 ---
 
@@ -49,14 +52,18 @@ mode is a small change and would have caught both bugs on the first run.
 
 The evidence supports a sharp condition, not a general endorsement:
 
-> The topological channel earns its dimensions when the state is a **set of
-> interacting entities** whose **interaction threshold is a fixed physical
-> distance**.
+> ~~The topological channel earns its dimensions when the state is a set of
+> interacting entities whose interaction threshold is a fixed physical
+> distance.~~ **Superseded — see §6b (R4, R5).** Falsified in two independent
+> ways and replaced by a two-clause condition: a *scale-relative* H₀ plateau
+> for representation, and *causal* (partition is an input to the dynamics, not
+> an observable of them) for prediction.
 
 | system | state | result |
 |---|---|---|
-| Lorenz (24-dim lift) | smooth trajectory | ~30% better rollout |
+| Lorenz (24-dim lift) | smooth trajectory | ~15% at k=1–4, *loses* at k=16 (was mis-stated as ~30%) |
 | S²-Rips entities | set of nodes | 0.855 vs 0.469 |
+| granular contact | set of disks | represents 0.778 vs 0.104; forecasts ~persistence |
 | distilgpt2 residual stream | token sequence | no gain at any layer |
 
 **R3 — Test the condition where it should pay.** Real MuJoCo contact dynamics,
@@ -111,11 +118,12 @@ as a third local section. Random input has anomalously *high* effective rank —
 the exact signal both current stalks miss. This is a new stalk, not a threshold
 tweak, and it is a few lines.
 
-**R9 — Gates as the honest product.** On sequence models the demonstrated value
-was monitoring, not prediction. A drift detector that never invokes the model,
-costs 0.74 ms, and fires on structural degeneracy is independently useful for
-production LLM serving. That framing deserves its own evaluation against
-standard OOD-detection baselines, which this work has not done.
+**R9 — Gates as the honest product.** *Done, and it did not survive (§6b).*
+Benchmarked against Mahalanobis, PCA reconstruction, k-NN, MSP and predictive
+entropy, the gate ranks **behind** the two cheapest baselines on mean AUROC. The
+claim that survives is applicability, not accuracy: it is the only detector that
+functions on an imagined state. Encode cost is now 0.909 ms, not 0.74 ms, after
+the `_pairwise` correctness fix.
 
 ---
 
@@ -156,6 +164,37 @@ Stated because an agenda that only adds is not an agenda.
   two mundane specification choices right, not from more mathematics.
 
 ---
+
+## 6b. Outcomes — eight items executed in parallel
+
+Every item below was run. Results are what came back, not what was hoped for.
+
+| item | outcome |
+|---|---|
+| **R2** auto (cloud, scale) | **Shipped**, opt-in (`cloud="auto"`). Plain self-predictability reproduces bug #1 — overlapping windows make a temporal psi its own successor (shuffled floor 0.56–0.82 vs −0.16 spatial), so the criterion subtracts a shuffled-order floor. 19/20 where the answer is structurally determined; fails when offered a bogus entity width. |
+| **R8** entropy stalk | **Shipped**, inert unless fed. Catches both tails (rank collapse *and* inflation) where the two-term gate caught neither on scrambled input. **Guards ingestion, not rollout** — there is no window for an imagined state. |
+| **R6** directional bound | **Shipped** as an estimate, never a guarantee. 12.6× tighter on anisotropic residuals, matches measured error to 1% — but under-bounds 2.4–4.6× when residuals are step-correlated. `residual_autocorr` is the discriminator. Deliberately **not** wired into the gate: it would pass everywhere, including where it is wrong. |
+| **R11** incremental salience | **Shipped**, 8.6–21.7× per block, bit-exact over 2748 comparisons. Found the parity claim was verified on gaussians only and failed 123/200 tie-heavy cases. |
+| **R9** OOD baselines | **Negative.** Gate 0.846 mean AUROC vs Mahalanobis 0.899, PCA 0.888 — both cheaper. Surviving claim is applicability (imagined states), not accuracy. |
+| **R4** falsification | **Condition falsified and replaced.** "Fixed physical distance" is wrong; a 3-decade dilating threshold reads just as well. Replaced by a scale-relative H₀ plateau. |
+| **R5** why tokens failed | **Answered.** psi encodes *lexical repetition* (distinct-type count, R² 0.537), not recency. Tokens satisfy the geometric condition and still fail, forcing the causal clause. |
+| **R3** contact physics | **Split.** Represents contact structure decisively (0.778 vs 0.104); forecasts it barely above a persistence baseline (0.265 vs 0.250); contributes exactly zero to coordinate rollout. |
+
+**What the parallel run bought that a serial one would not.** Three agents
+independently hit the same PCA-rank confound in `compare()`, which is what made
+it credible enough to fix rather than explain away. Agent R5 invalidated the
+criterion agent R2 had just shipped (self-predictability reads 0.762 on exactly
+the case it should reject). Agent R11 found that a parity claim I had verified
+and published was true only for the input family I happened to sample. None of
+those came from the agent that owned the relevant file.
+
+**Four shipped claims were wrong**, all for the same reason — a missing control,
+never failing mathematics:
+
+- ~30% Lorenz gain → dimension-matched arm co-varied PCA rank (~15%, reverses at k=16)
+- gate as a cheap OOD detector → no baselines had ever been run
+- bit-identical kernel parity → only continuous inputs sampled
+- "fixed physical distance" → no scale-varying control existed
 
 ## 7. Ranked
 

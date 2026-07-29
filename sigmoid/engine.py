@@ -28,7 +28,7 @@ import numpy as np
 from .adapters import capture_hidden
 from .operator import CouplingOperator, RolloutCertificate
 from .sheaf import GateReading, SheafGate
-from .state import TopoEncoder, TopoEncoderConfig
+from .state import CloudSelection, TopoEncoder, TopoEncoderConfig, select_cloud
 
 __all__ = ["SigmoidConfig", "Rollout", "SigmoidWorldModel", "wrap"]
 
@@ -47,6 +47,21 @@ class SigmoidConfig:
     entity_dim: int = 0
     """Set to the per-entity width for set-structured states (particles,
     bodies, agents). Leave 0 for sequence states. See TopoEncoderConfig."""
+
+    cloud: str = "fixed"
+    """"fixed" honours entity_dim and the absolute-radius settings as written.
+    "auto" picks both by unsupervised psi self-predictability -- see
+    state.select_cloud.
+
+    Fixed is the default because auto costs about five encoder fits and because
+    a caller who already knows their state is a set of 3-vectors should say so.
+    Auto is for the case that cost this project most: nobody knew, the wrong
+    choice raised nothing, and psi silently measured the wrong object."""
+
+    cloud_candidates: tuple[int, ...] = (0,)
+    """Candidate entity widths for cloud="auto". Never inferred -- a width that
+    divides the observation dimension is not evidence that the state is a set of
+    entities of that width."""
 
     ridge: float = 1e-3
 
@@ -126,6 +141,12 @@ class SigmoidWorldModel:
     block_diagonal_: bool = False
     """Which block structure the fit actually selected."""
 
+    cloud_selection_: CloudSelection | None = field(default=None, repr=False)
+    """Which (cloud, scale) the fit selected and what it beat, or None when
+    cloud="fixed". Not persisted -- the choice itself survives in the encoder's
+    own config, only the scores that justified it are calibration-time
+    diagnostics."""
+
     fitted: bool = False
 
     # ---- construction -----------------------------------------------------
@@ -171,7 +192,21 @@ class SigmoidWorldModel:
             raise ValueError(f"trajectories disagree on hidden dim: {sorted(dims)}")
         self.hidden_dim = dims.pop()
 
-        self.encoder = TopoEncoder(config=self.config.encoder_config())
+        encoder_config = self.config.encoder_config()
+        if self.config.cloud == "auto":
+            self.cloud_selection_ = select_cloud(
+                encoder_config,
+                trajs,
+                self.config.cloud_candidates,
+                ridge=self.config.ridge,
+            )
+            encoder_config = self.cloud_selection_.config(encoder_config)
+        elif self.config.cloud != "fixed":
+            raise ValueError(
+                f'cloud must be "fixed" or "auto", got {self.config.cloud!r}'
+            )
+
+        self.encoder = TopoEncoder(config=encoder_config)
         self.encoder.fit(np.concatenate(trajs, axis=0))
 
         per_traj = [self.encoder.encode_trajectory(t) for t in trajs]
@@ -312,6 +347,7 @@ class SigmoidWorldModel:
     def summary(self) -> dict:
         self._check_fitted()
         cert = self.certificate()
+        sel = self.cloud_selection_
         return {
             "hidden_dim": self.hidden_dim,
             "state_dim": self.state_dim,
@@ -319,6 +355,26 @@ class SigmoidWorldModel:
             "linear_dim": self.config.linear_dim,
             "window": self.config.window,
             "transitions": self.n_transitions,
+            # Read off the encoder, not the config: under cloud="auto" these are
+            # the two settings the fit changed, and a summary that reported the
+            # requested value instead of the effective one would reintroduce
+            # exactly the silence this selection exists to remove.
+            "entity_dim": self.encoder.config.entity_dim,
+            "absolute_radii": bool(self.encoder.n_abs_radii),
+            "cloud_selection": None
+            if sel is None
+            else {
+                "score": round(sel.chosen.score, 4),
+                "self_r2": round(sel.chosen.self_r2, 4),
+                "overlap_floor": round(sel.chosen.surrogate_r2, 4),
+                "runner_up": round(
+                    max(
+                        (c.score for c in sel.candidates if c is not sel.chosen),
+                        default=float("-inf"),
+                    ),
+                    4,
+                ),
+            },
             "block_diagonal": self.block_diagonal_,
             "rho": round(cert.rho, 6),
             "contractive": cert.contractive,
