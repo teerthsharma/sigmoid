@@ -88,6 +88,8 @@
       <span class="pill">coupling operator</span>
       <span class="pill">Banach fixed point</span>
       <span class="pill">numpy + scipy</span>
+      <span class="pill">Triton kernel</span>
+      <span class="pill">agentic runtime</span>
     </div>
     <div>
       <a class="cta" href="https://github.com/teerthsharma/sigmoid">GitHub</a>
@@ -115,6 +117,15 @@ operator forward in place of the model.</p>
 
 <p>The operator is a ridge solve — convex, closed-form, no gradients — so
 calibration is seconds and one imagined step is a single matrix–vector product.</p>
+
+<p>The same 0D-persistence machinery drives a real generation loop: block
+schedules feed the merged
+<a href="https://github.com/triton-lang/kernels/pull/22">triton-lang/kernels#22</a>
+attention kernel, a KV-cached engine reproduces HuggingFace greedy decoding
+token-for-token on its dense control, and an agentic runtime lets an LLM command
+a robot through a world model that can <strong>refuse</strong>. Whether the
+sparse path is <em>faster</em> is answered honestly below: on models this GPU can
+run, it is not.</p>
 
 <div class="grid">
   <div class="card"><h4>State</h4><p>Persistence barcode plus a decodable PCA channel, <code>z = [ψ ; u]</code>.</p></div>
