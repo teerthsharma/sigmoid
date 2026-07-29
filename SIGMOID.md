@@ -405,7 +405,15 @@ proof rather than a measurement; it holds on all 200. The same cancellation was
 found in `state._pairwise` and fixed there too, where it had been silently
 merging distinct points in `h0_barcode` (a cluster at offset 1e6 with 1e-6
 separation reported merge heights [1, 1, inf], losing the real merge). That fix
-costs 23% on the encode path: 0.74 ms -> 0.909 ms per window. Since the promotion rules require schedule-build time to be
+costs 23% on the encode path: 0.74 ms -> 0.909 ms per window.
+
+The *other* cause carried across too, and was missed longer: `h0_barcode` built
+its MST straight from the dense matrix, so `csr_matrix` dropped exactly-zero
+edges there as well and genuinely coincident points were reported as separating
+at O(1) -- the same [1, 1] instead of [0, 1]. Fixed by building the graph with
+`csgraph_from_dense(..., null_value=inf)`, which keeps zero edges, and restoring
+the heights that come back indistinguishable from absences by edge count.
+Bit-identical on clouds with no coincident points. Since the promotion rules require schedule-build time to be
 reported separately from attention time, a 13× faster builder is a real gain at
 long context, where the reference's O(n²) sort would otherwise show up in
 end-to-end numbers.

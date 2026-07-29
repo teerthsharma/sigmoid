@@ -53,6 +53,13 @@ merged Triton kernel salience of
 [`triton-lang/kernels#22`](https://github.com/triton-lang/kernels/pull/22)
 **bit-identically at 13×** the speed.
 
+Those schedules drive a working generation loop rather than a study: a KV-cached
+inference engine that reproduces HuggingFace greedy decoding token-for-token on
+its dense control, an agentic runtime with Hermes tool calling over twelve LLM
+providers, and a robot bridge in which the world model can **refuse** a plan.
+Whether the sparse path is *faster* is reported honestly in §18 — on models
+this GPU can run, it is not.
+
 Four of my own claims that adversarial review falsified are reported in full,
 along with the two-clause condition that replaced my original hypothesis.
 
@@ -82,6 +89,9 @@ out-of-distribution detection, inference engines
 | [13](#13-installation-and-use) | Installation and use |
 | [14](#14-what-i-got-wrong) | What I got wrong |
 | [15](#15-provenance) | Provenance |
+| [16](#16-the-inference-engine) | The inference engine |
+| [17](#17-agentic-runtime-for-robots) | Agentic runtime for robots |
+| [18](#18-does-sparse-attention-actually-pay) | Does sparse attention actually pay? |
 
 ---
 
@@ -628,6 +638,139 @@ model activations.
 | **topological-ml-toolkit** | persistence and Betti-curve API contract, Mapper covers, sheaf consistency residual |
 | [**mujoco#3396**](https://github.com/google-deepmind/mujoco/pull/3396) | the S²–Vietoris–Rips corpus: unit directions, tangent velocities, geodesic Rips, islands as H₀ |
 | [**triton-lang/kernels#22**](https://github.com/triton-lang/kernels/pull/22) | 0D-persistence salience over key-block centroids → causal CSR block schedule |
+
+---
+
+## 16. The inference engine
+
+The schedules of §11 are not a study; they drive a real generation loop.
+`InferenceEngine` does prefill and decode with a genuine KV cache, builds the
+block schedule from the cached keys, and grows it with `IncrementalSalience`
+rather than rebuilding — the schedule only changes on the token that completes a
+block, verified as exactly once per 64 decode steps.
+
+```python
+from sigmoid import InferenceEngine, InferenceConfig
+
+engine = InferenceEngine(model, tokenizer,
+                         config=InferenceConfig(backend="triton", topk=4))
+for token in engine.generate(prompt, max_new_tokens=128, stream=True):
+    print(token, end="")
+
+engine.stats.tokens_per_second      # schedule ms reported apart from attention ms
+```
+
+**Correctness is proven by two controls before any speed claim is made:**
+
+| control | result |
+|---|---|
+| `backend="dense"` vs HuggingFace `model.generate(do_sample=False)` | **64/64 tokens identical** |
+| saturated schedule through the *sparse* plumbing, torch and triton | token-for-token dense, **KL < 1e-9** |
+
+The second matters more than the first: it runs the full sparse path with a
+schedule that happens to select everything, so it separates "the plumbing is
+wrong" from "sparsity costs quality". The plumbing is not wrong.
+
+Quality at real sparsity, context 960, 48 greedy tokens:
+
+| topk | radius | density | KL (nats) | diverged |
+|---|---|---|---|---|
+| saturated | saturated | 1.000 | 0.00000 | 0/48 |
+| 8 | 2 | 0.721 | 0.03960 | 46/48 |
+| 4 | 1 | 0.481 | 0.11923 | 46/48 |
+| **0** | 1 | 0.350 | **0.99315** | 47/48 |
+
+Greedy decoding diverges almost immediately at any real sparsity — a KL of 0.04
+nats is enough to change a token, and once one token changes the continuations
+part. The load-bearing row is the last: dropping topology entirely at *similar
+density* costs **8–14× the KL**, so the salient blocks are earning their place.
+The schedule is not a local window with extra steps.
+
+## 17. Agentic runtime for robots
+
+An LLM that can command a robot through a world model which is able to **refuse**.
+
+```python
+from sigmoid import RobotAgent
+from sigmoid.providers import auto
+
+agent = RobotAgent(provider=auto(), world=world_model, mpc=planner)
+result = agent.run("move the team into two groups without anyone touching")
+```
+
+Tools the model may call: `observe`, `imagine(steps)`, `plan_to(goal)`,
+`check_safety(action)`, and `execute(plan)` — the last marked `dangerous=True`.
+
+**Three independent gates**, because one is not enough for an actuator:
+
+1. **Schema validation before the function runs.** Types, required fields,
+   enums, and *unknown keys rejected* — a silently dropped hallucinated argument
+   is how a robot ignores a constraint it appeared to honour. `bool` cannot
+   satisfy `integer`.
+2. **`HookVeto` at `BEFORE_TOOL`** blocks execution outright. The test asserts
+   the actuator list is **empty**, not merely that the hook fired.
+3. **`dangerous=True` requires confirmation from outside the conversation** — a
+   `confirm=` callable or a hook. The model can ask; it can never authorise.
+
+**Refusal is a value, not an exception.** When the MPC gate reports that every
+candidate rollout left the calibrated region, the tool returns a structured
+refusal the model can read and route around. `execute` refuses an infeasible
+plan *even when confirmed*: confirmation authorises intent, it is not evidence
+about the rollout.
+
+Tool calls are parsed in **Hermes** format — `<tool_call>{...}</tool_call>` with
+schemas declared in the system prompt — because that is what a local checkpoint
+emits; native tool-call fields are used when a hosted API provides them. The
+parser returns a *result* for every malformed case rather than raising:
+invalid JSON, unterminated tags from a token-budget cut, missing names,
+double-encoded arguments, multiple calls per message, prose interleaved.
+
+Twelve providers behind one interface, keys from environment variables only:
+
+```
+local -> ollama -> vllm -> groq -> openai -> anthropic -> gemini
+      -> deepseek -> mistral -> together -> openrouter -> xai
+```
+
+`auto()` prefers on-board first: no radio dependency, no rate limit. No provider
+stores a key — headers are read from `os.environ` per request, so there is no
+attribute to leak — and a redaction layer plus six named tests check that a
+planted canary key never reaches a `repr`, a `str`, or a raised exception.
+
+## 18. Does sparse attention actually pay?
+
+**Not on anything distilgpt2 can run.** Reported because the honest answer is
+more useful than the flattering one.
+
+End-to-end generation, best of three: dense **102/97/95** tok/s at context
+256/512/960 against topology **51/70/78**. Topology loses everywhere. Laptop-GPU
+clock drift is ±20% run to run, the same size as the effect, so the attention-op
+measurements below are the trustworthy ones.
+
+| positions | 12×64 dense/topo | 32×128 dense/topo | density |
+|---|---|---|---|
+| 1024 *(real)* | 0.216 / 0.287 → 0.75× | 0.237 / 0.597 → 0.40× | 1.000 |
+| 4096 | 0.183 / 0.293 → 0.62× | 0.579 / 0.891 → 0.65× | 0.34 |
+| 8192 | 0.267 / 0.290 → 0.92× | **1.137 / 0.917 → 1.24×** | 0.18 |
+| 16384 | **0.600 / 0.545 → 1.10×** | 2.562 / 0.924 → 2.77× | 0.094 |
+| 131072 | 3.399 / 0.545 → **6.24×** | — | 0.012 |
+
+**Crossover is ~16k positions at distilgpt2's geometry, ~8k at 32×128.**
+distilgpt2 caps at 1024, so **every winning row is synthesized** — real K/V
+tensors at the model's head geometry, no token generated. Only the 1024 row is
+a real forward pass.
+
+**Root cause of the loss, measured rather than guessed:** `index_select`
+materializes the selection, so a decode step reads the chosen keys *and writes
+them back*. At 12×64 and 65536 positions the gather alone costs **2.58 ms**
+against **0.82 ms** for attention over the same slice. Sparsity only pays once
+density falls far enough that the write is cheaper than a dense read. The fix is
+a fused decode kernel; the merged kernel cannot serve decode because it requires
+`q.shape == k.shape`.
+
+Schedule construction is **not** the bottleneck, which is worth stating since
+this project spent effort making it 13× faster: at context 960 it is 44 ms
+against 199 ms of attention, ~18% of the sparse path.
 
 ---
 
