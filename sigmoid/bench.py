@@ -70,11 +70,12 @@ class BenchReport:
 
     def table(self) -> str:
         hs = self.horizons
-        head = f"{'arm':<14}{'dim':>5}  " + "  ".join(f"k={h:<8}" for h in hs) + f"{'rho':>8}"
+        width = max(20, max(len(a.name) for a in self.arms) + 2)
+        head = f"{'arm':<{width}}{'dim':>5}  " + "  ".join(f"k={h:<8}" for h in hs) + f"{'rho':>8}"
         lines = [head, "-" * len(head)]
         for arm in self.arms:
             cells = "  ".join(f"{arm.nrmse.get(h, float('nan')):<10.4f}" for h in hs)
-            lines.append(f"{arm.name:<14}{arm.state_dim:>5}  {cells}{arm.rho:>8.4f}")
+            lines.append(f"{arm.name:<{width}}{arm.state_dim:>5}  {cells}{arm.rho:>8.4f}")
         lines.append("")
         for name, ok in self.gates.items():
             lines.append(f"  [{'PASS' if ok else 'FAIL'}] {name}")
@@ -229,9 +230,30 @@ def compare(
             "comparison is not budget-matched"
         )
 
+    # The topology-only ablation: same linear channel, psi deleted.
+    #
+    # `linear_only` above matches the TOTAL state dimension, which sounds like
+    # the fair comparison and is not: it raises the PCA rank from linear_dim to
+    # state_dim, and that shrinks the residual `decode_with_residual` carries
+    # forward from the anchor. In carry-friendly worlds a larger residual helps,
+    # so the dimension-matched arm is silently handicapped and topology looks
+    # better than it is. Measured on a granular contact world: sigmoid and
+    # u-matched linear agreed to four decimals (0.0072 / 0.0279 / 0.0905) while
+    # the dimension-matched arm read 0.0179 / 0.0690 / 0.2349 -- the entire
+    # apparent 60% "win" was the rank change. On Lorenz the same confound
+    # inflated a real ~15% one-step gain into a reported ~30%.
+    #
+    # Holding u fixed and removing only psi co-varies nothing but topology, so
+    # this is the arm the accuracy gate judges. `linear_only` is kept because
+    # the budget question ("is psi the best use of those dimensions?") is also
+    # worth answering -- it is just a different question.
+    u_matched_cfg = SigmoidConfig(**{**vars(config), "use_topology": False})
+    u_matched, u_matched_secs = _build(u_matched_cfg, train)
+
     arms: list[ArmResult] = []
     for name, wm, secs in (
         ("sigmoid", full, full_secs),
+        ("no_topology_same_u", u_matched, u_matched_secs),
         ("linear_only", linear, linear_secs),
         ("carry", _Carry(config=config).fit(train), 0.0),
         ("mean", _Mean(config=config).fit(train), 0.0),
@@ -262,6 +284,18 @@ def compare(
         real_ms = (time.perf_counter() - t0) / 5 * 1e3
 
     long_h = max(horizons)
+
+    # Per-horizon topology delta. The gate is judged at the longest horizon,
+    # but topology can help early and hurt late -- measured on Lorenz, psi wins
+    # at k=1 and k=4 and loses at k=16. A single-horizon verdict hides that,
+    # and the sign flip is the interesting part.
+    u_arm = next(a for a in arms if a.name == "no_topology_same_u")
+    sig_arm = next(a for a in arms if a.name == "sigmoid")
+    deltas = " ".join(
+        f"k={h}:{sig_arm.nrmse[h] - u_arm.nrmse[h]:+.4f}" for h in horizons
+    )
+    notes.append(f"topology delta vs same-u ablation (negative = helps): {deltas}")
+
     measured = latent_rollout_error(full, test, long_h)
     bound = full.certificate(long_h).bound
     notes.append(
@@ -297,6 +331,7 @@ def gate_report(
     """
     by_name = {a.name: a for a in arms}
     sig, lin = by_name["sigmoid"], by_name["linear_only"]
+    same_u = by_name["no_topology_same_u"]
     carry, mean = by_name["carry"], by_name["mean"]
 
     # The certificate bound only certifies anything if it is tighter than the
@@ -306,8 +341,19 @@ def gate_report(
     # containment, otherwise a worse operator scores a free pass.
     bound_is_informative = bool(np.isfinite(certificate_bound) and certificate_bound < 1.0)
 
+    # A strict `<` passes on a delta of -0.0000, which is what a block-diagonal
+    # operator produces: psi structurally cannot reach u, so the two arms are
+    # the *same computation* and differ only in float noise. Reporting that as
+    # "psi is doing work" is exactly backwards, so require a real margin.
+    margin = 1e-4
+
     gates = {
-        "accuracy: sigmoid beats linear_only at matched dim": bool(
+        # THE topology gate: same linear channel, psi deleted. Nothing else
+        # co-varies, so a win here is attributable to topology and only here.
+        "topology: sigmoid beats the same-u ablation (psi is doing work)": bool(
+            sig.nrmse[long_h] < same_u.nrmse[long_h] - margin
+        ),
+        "budget: sigmoid beats linear_only at matched total dim": bool(
             sig.nrmse[long_h] < lin.nrmse[long_h]
         ),
         "accuracy: sigmoid beats carry-forward": bool(

@@ -26,7 +26,8 @@ H1 needs Rips and is calibration-only -- never call it in a hot loop.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import Sequence
 
 import numpy as np
 
@@ -34,6 +35,9 @@ __all__ = [
     "Barcode",
     "TopoEncoderConfig",
     "TopoEncoder",
+    "CloudChoice",
+    "CloudSelection",
+    "select_cloud",
     "h0_barcode",
     "h1_barcode",
     "hilbert_coefficients",
@@ -68,10 +72,27 @@ class Barcode:
 
 
 def _pairwise(points: np.ndarray) -> np.ndarray:
-    sq = np.sum(points * points, axis=1)
-    d2 = sq[:, None] + sq[None, :] - 2.0 * (points @ points.T)
-    np.maximum(d2, 0.0, out=d2)
-    d = np.sqrt(d2)
+    """Exact Euclidean distances. Subtracts before squaring, deliberately.
+
+    The Gram identity |x|^2 + |y|^2 - 2x.y is one matmul and was used here
+    until it was caught losing real structure: for points at offset 1e6 with
+    1e-6 separation it cancels to *exactly* 0.0, so h0_barcode reported merge
+    heights of [1, 1, inf] and the true 1e-6 merge vanished. Two points that
+    are close but distinct become one point, which is the single worst thing a
+    persistence routine can do.
+
+    That is not exotic input. The encoder standardizes before computing
+    temporal clouds, which hides it, but spatial (`entity_dim`) clouds are read
+    raw, so any world whose coordinates carry a large offset and fine structure
+    is exposed. The same cancellation produced whole-block salience errors of
+    up to 4.75 in the sibling schedule.py path.
+
+    cdist subtracts first and costs a few percent at window sizes that matter.
+    """
+    from scipy.spatial.distance import cdist
+
+    pts = np.ascontiguousarray(points, dtype=np.float64)
+    d = cdist(pts, pts)
     np.fill_diagonal(d, 0.0)
     return d
 
@@ -579,3 +600,188 @@ def _lag1_autocorrelation(series: np.ndarray) -> np.ndarray:
 def _windows(traj: np.ndarray, window: int):
     for end in range(window, traj.shape[0] + 1):
         yield traj[end - window : end]
+
+
+# --------------------------------------------------------------------------
+# unsupervised (cloud, scale) selection
+# --------------------------------------------------------------------------
+#
+# Two binary choices sit upstream of every persistence pipeline -- which point
+# cloud, and whether the diameter is divided out -- and getting either wrong
+# produces a psi with healthy variance and no information. Neither failure
+# raises. On the S2-Rips corpus the temporal cloud scored 0.386 against a 0.487
+# majority baseline; switching to the entity cloud gave 0.764 and keeping the
+# absolute scale gave 0.855. Same code, same data, three different conclusions
+# about whether topology helps.
+#
+# The choice can be made without labels because a psi that is measuring
+# something is *self-predictable*: on real data psi predicted psi one step ahead
+# at R^2 = 0.762, and a psi that is measuring nothing does not.
+
+
+@dataclass(frozen=True)
+class CloudChoice:
+    """One (cloud, scale) candidate and how self-predictable its psi turned out."""
+
+    entity_dim: int
+    absolute_radii: bool
+    self_r2: float
+    """One-step ridge R^2 of psi_t -> psi_{t+1} on a held-out tail."""
+
+    surrogate_r2: float
+    """The same R^2 after the observation order is shuffled -- the overlap floor.
+
+    Consecutive temporal windows share W-1 of their W points, so a temporal psi
+    is nearly its own successor and scores high on pure noise. Measured across
+    four systems the shuffled floor was 0.56 to 0.82 for entity_dim=0 against
+    -0.16 to 0.00 for a spatial cloud, which is enough to hand the temporal
+    candidate an uninformative win: on the breathing-scale system below, raw
+    self-predictability ranked temporal 0.660 over spatial 0.555 even though
+    only the spatial psi tracked the ground truth (|r| 0.87 vs 0.22).
+
+    Shuffling time keeps the overlap and destroys the dynamics, so subtracting
+    it leaves the part of self-predictability that is about the system.
+    """
+
+    n_informative: int
+    """Held-out psi features with usable variance. Zero means a degenerate psi,
+    which is perfectly predictable and worth nothing -- scored as -inf."""
+
+    @property
+    def score(self) -> float:
+        if not np.isfinite(self.self_r2):
+            return float("-inf")
+        return self.self_r2 - max(self.surrogate_r2, 0.0)
+
+    def apply(self, base: TopoEncoderConfig) -> TopoEncoderConfig:
+        """This candidate's settings written onto a base config."""
+        if not self.absolute_radii:
+            return replace(base, entity_dim=self.entity_dim, n_abs_radii=0, abs_radii=None)
+        if base.n_abs_radii or base.abs_radii:
+            return replace(base, entity_dim=self.entity_dim)
+        # The caller turned absolute radii off entirely, so there is nothing to
+        # switch back on; fall back to the documented default count.
+        return replace(
+            base, entity_dim=self.entity_dim, n_abs_radii=TopoEncoderConfig().n_abs_radii
+        )
+
+
+@dataclass(frozen=True)
+class CloudSelection:
+    """What `select_cloud` picked, and everything it beat."""
+
+    chosen: CloudChoice
+    candidates: tuple[CloudChoice, ...]
+
+    def config(self, base: TopoEncoderConfig) -> TopoEncoderConfig:
+        return self.chosen.apply(base)
+
+
+def select_cloud(
+    base: TopoEncoderConfig,
+    trajectories: Sequence[np.ndarray],
+    entity_dims: Sequence[int] = (0,),
+    *,
+    ridge: float = 1e-3,
+    holdout: float = 0.2,
+    seed: int = 0,
+) -> CloudSelection:
+    """Pick (cloud, scale) by psi self-predictability, using no labels.
+
+    `entity_dims` are candidate entity widths *supplied by the caller*. They are
+    never guessed: a width that happens to divide the observation dimension is
+    not evidence that the state is a set of entities of that width, and picking
+    one from thin air would replace a silent bug with a confident one. The
+    default (0,) therefore only ever compares temporal-cloud variants.
+
+    Known miss, measured: offering a width that merely divides the observation
+    dimension can win it. On a 24-dim random lift of Lorenz, entity_dim=3 scored
+    0.42 against 0.27 for the temporal cloud on all four seeds tried -- eight
+    points sliding smoothly through R^3 genuinely are more self-predictable than
+    a trajectory-segment barcode -- yet the resulting world model rolled out
+    worse (0.404 against 0.318 nrmse at k=4). The criterion tests whether psi is
+    measuring *something*, not whether it is measuring the right thing. On
+    systems whose entity structure is real (entity clusters, a robot swarm, a
+    fixed-radius merge) it was correct on 19 of 20 runs.
+
+    Costs one encoder fit plus two encode passes per candidate, so four
+    candidates is roughly five times a plain `TopoEncoder.fit`. Calibration
+    path only.
+    """
+    if not base.use_topology:
+        raise ValueError("select_cloud needs use_topology=True; there is no psi to score")
+
+    trajs = [np.asarray(t, dtype=np.float64) for t in trajectories]
+    if not trajs:
+        raise ValueError("select_cloud needs at least one trajectory")
+
+    # The caller's own combination is evaluated first so that `max` -- which
+    # keeps the first maximum -- leaves the config alone on a tie.
+    base_abs = bool(base.n_abs_radii or base.abs_radii)
+    combos = [(base.entity_dim, base_abs)]
+    for width in entity_dims:
+        for use_abs in (True, False):
+            if (width, use_abs) not in combos:
+                combos.append((width, use_abs))
+
+    rng = np.random.default_rng(seed)
+    shuffled = [t[rng.permutation(t.shape[0])] for t in trajs]
+    joined = np.concatenate(trajs, axis=0)
+
+    candidates: list[CloudChoice] = []
+    for width, use_abs in combos:
+        probe = CloudChoice(width, use_abs, 0.0, 0.0, 0)
+        enc = TopoEncoder(config=probe.apply(base)).fit(joined)
+        real, n_informative = _psi_self_r2(enc, trajs, ridge, holdout)
+        surrogate, _ = _psi_self_r2(enc, shuffled, ridge, holdout)
+        candidates.append(
+            CloudChoice(width, use_abs, real, surrogate, n_informative)
+        )
+
+    return CloudSelection(
+        chosen=max(candidates, key=lambda c: c.score), candidates=tuple(candidates)
+    )
+
+
+def _psi_self_r2(
+    encoder: TopoEncoder,
+    trajectories: Sequence[np.ndarray],
+    ridge: float,
+    holdout: float,
+) -> tuple[float, int]:
+    """Held-out R^2 of a one-step ridge from psi_t to psi_{t+1}, and its rank.
+
+    Pairs never straddle a trajectory boundary, and the split is contiguous so
+    the held-out slice is genuinely later than the fit.
+    """
+    topo_dim = encoder.topo_dim
+    psis = [encoder.encode_trajectory(t)[:, :topo_dim] for t in trajectories]
+    psis = [p for p in psis if p.shape[0] >= 2]
+    if not psis:
+        raise ValueError("no trajectory long enough to form a psi transition")
+    x = np.concatenate([p[:-1] for p in psis], axis=0)
+    y = np.concatenate([p[1:] for p in psis], axis=0)
+
+    cut = int(round(x.shape[0] * (1.0 - holdout)))
+    if cut < 8 or x.shape[0] - cut < 4:
+        raise ValueError(
+            f"need at least {int(np.ceil(12 / max(holdout, 1e-9)))} psi transitions to "
+            f"score a candidate, got {x.shape[0]}"
+        )
+    x_fit, y_fit, x_val, y_val = x[:cut], y[:cut], x[cut:], y[cut:]
+
+    x_mean, y_mean = x_fit.mean(axis=0), y_fit.mean(axis=0)
+    a = x_fit - x_mean
+    weights = np.linalg.solve(
+        a.T @ a + ridge * np.eye(a.shape[1]), a.T @ (y_fit - y_mean)
+    )
+    pred = (x_val - x_mean) @ weights + y_mean
+
+    # A constant feature is predicted perfectly and says nothing, so scoring it
+    # would reward degeneracy -- exactly the failure mode being guarded against.
+    live = y_val.std(axis=0) > 1e-6
+    if not live.any():
+        return float("-inf"), 0
+    resid = ((y_val[:, live] - pred[:, live]) ** 2).sum(axis=0)
+    total = ((y_val[:, live] - y_val[:, live].mean(axis=0)) ** 2).sum(axis=0)
+    return float(np.mean(1.0 - resid / total)), int(live.sum())

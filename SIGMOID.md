@@ -231,9 +231,23 @@ Matched state dimension 38, 2000 steps, 30% held out.
 | carry-forward | 0.0802 | 0.3117 | 1.0179 |
 | predict-the-mean | 1.0545 | 1.0554 | 1.0598 |
 
-**~30% relative improvement over the same-dimension linear model.** The
-topological channel earns its dimensions on a low-dimensional, smooth,
-deterministic system.
+**CORRECTED — the original ~30% figure was confounded.** That compared against
+a *dimension-matched* arm (`linear_only`), which raises the PCA rank from 12 to
+46. Higher rank shrinks the residual `decode_with_residual` carries forward from
+the anchor, and in carry-friendly worlds a larger residual helps -- so the
+dimension-matched arm was handicapped for reasons unrelated to topology.
+
+Against the arm that changes **only** psi (same linear channel, psi deleted):
+
+| arm | dim | k=1 | k=4 | k=16 |
+|---|---|---|---|---|
+| sigmoid | 46 | **0.0622** | **0.2662** | 1.1266 |
+| no-topology, same u | 12 | 0.0734 | 0.2853 | **0.9889** |
+| no-topology, matched dim | 46 | 0.0737 | 0.2854 | 0.9887 |
+
+The honest result is a **~15% gain at k=1-4 that reverses to a 14% loss at
+k=16**. `bench.py` now runs both arms, gates on the same-u one, and prints the
+per-horizon delta so the sign flip cannot hide behind a single number.
 
 ### 4.2 distilgpt2 residual stream — negative result on accuracy
 
@@ -373,7 +387,25 @@ builders are exercised):
 | 512 | 1.8e-15 | 637.23 ms | 47.28 ms | 13.5× |
 
 Full CSR schedules are **bit-identical** at seq 512/1024/2048. Deviation is
-float64 round-off. Since the promotion rules require schedule-build time to be
+float64 round-off.
+
+**CORRECTED — that verification was incomplete.** It used random gaussian
+centroids only. On tie-heavy inputs the original path disagreed with the merged
+reference on **123 of 200 cases, by up to 4.75 absolute salience** -- whole
+blocks selected or dropped. Two pre-existing causes: `csr_matrix` drops explicit
+zeros, so coincident blocks lost their zero-length edge and never merged; and
+the Gram distance identity cancels to *exactly* 0.0 for points 3e-12 apart.
+Failure rate by input family: 40/40 on 1e-12-separated blocks, 39/40 on
+duplicated rows, 29/40 on integer lattices, **0/40 on random gaussians** --
+which is precisely why the original check passed.
+
+Fixed with canonical Prim over a strict (distance, low, high) total order plus
+`cdist`. A strict order admits exactly one spanning tree, so parity is now a
+proof rather than a measurement; it holds on all 200. The same cancellation was
+found in `state._pairwise` and fixed there too, where it had been silently
+merging distinct points in `h0_barcode` (a cluster at offset 1e6 with 1e-6
+separation reported merge heights [1, 1, inf], losing the real merge). That fix
+costs 23% on the encode path: 0.74 ms -> 0.909 ms per window. Since the promotion rules require schedule-build time to be
 reported separately from attention time, a 13× faster builder is a real gain at
 long context, where the reference's O(n²) sort would otherwise show up in
 end-to-end numbers.
@@ -469,42 +501,181 @@ run with a 5-passage corpus produced a different verdict on the same probe.
 
 ---
 
+### 4.10 What psi actually encodes on tokens — the null explained
+
+The distilgpt2 null was an open question for most of this project. It has an
+answer, and it changes the central claim.
+
+psi on a token window encodes **lexical repetition**. Probes (passage-split, psi
+and u given identical treatment):
+
+| target | psi | u | baseline |
+|---|---|---|---|
+| position in passage | 0.020 | 0.169 | 0.0 |
+| tokens since sentence end | 0.091 | 0.276 | 0.0 |
+| **distinct tokens in window** | **0.537** | 0.087 | 0.0 |
+| log frequency of last token | -0.011 | 0.681 | 0.0 |
+| `u_{t+1}` (the actual task) | **-0.075** | 0.198 | 0.0 |
+
+Mechanism: same-token positions sit at median distance **17.6**, different-token
+positions at **34.9** -- a 1.98x gap. *That gap is the interaction radius*, and
+what it separates is token identity, so the H0 partition of a token window is
+close to the partition into token types and beta_0 counts distinct types. A
+sweep of 12 radii across the full observed merge range (4.3-69.1) found **no
+radius anywhere that sees content**: psi -> u_{t+1} stayed at about -0.047
+throughout, and next-token-punctuation stayed exactly at the majority rate.
+
+"psi is measuring positional recency" -- the hypothesis this project expected --
+is falsified: a 4-term position basis reconstructs 0 of 37 live psi dimensions.
+
+### 4.11 The condition, corrected
+
+Token windows **satisfy** the stated condition. Entities are token positions;
+the threshold is the token-identity distance gap; it is fixed. And topology
+still bought nothing. So the condition as stated was incomplete, and the missing
+clause is causal rather than geometric:
+
+> The partition at that radius must be an **input to the dynamics**, not merely
+> an **observable of them**.
+
+And a second, independent falsification (4.13) removed the *other* clause. The
+final two-part condition:
+
+> **Representation.** psi reads the partition when the component count has a
+> plateau in radius -- a band, fixed relative to the configuration's own scale,
+> on which H0 does not change.
+>
+> **Prediction.** Reading it helps only when that partition is an input to the
+> dynamics rather than an observable of them.
+
+On S²-Rips and the contact world the island partition *is* the constraint graph:
+what merges determines what moves next. On tokens the identical construction
+yields a tally of what already happened, which is why psi self-predicts at 0.762
+while predicting content at ~0. Self-consistency and causal relevance are
+different properties, and only the first is free.
+
+This has a direct consequence for the automatic (cloud, scale) selector of 4.12:
+gating on psi self-predictability would have rated the token encoder highly. The
+right criterion is `psi -> next state`, which is one ridge fit and would have
+called this null before the layer sweep was ever run.
+
+### 4.12 Granular contact physics — represents, does not forecast
+
+24 soft disks, Hookean contact at a fixed radius, velocity Verlet, no damping
+(a dissipative gas freezes and the ground truth goes constant). Energy drift
+0.81%, 17 distinct component counts, 1477 merges/splits in 1999 steps.
+
+| probe (lag = steps ahead) | psi | u (16) | u (52) | majority | persistence |
+|---|---|---|---|---|---|
+| 0 | **0.778** | 0.094 | 0.104 | 0.200 | 1.000 |
+| 1 | 0.265 | 0.094 | 0.094 | 0.201 | 0.250 |
+| 4 | 0.203 | 0.108 | 0.110 | 0.201 | 0.128 |
+| 16 | 0.187 | 0.151 | 0.163 | 0.202 | 0.139 |
+
+Representation: decisive (0.778 against a 0.200 floor; the 52-dim linear channel
+manages 0.104). beta_0 at the true contact radius equals the component count
+exactly, correlation 1.0000 on every frame.
+
+Forecasting: **fails**. Lag-1 scores 0.265 against a *persistence* baseline of
+0.250 -- i.e. barely better than copying the present. The persistence baseline
+was not in the original spec and its absence would have made lag-1 look like
+successful forecasting.
+
+Coordinate rollout: psi contributes **exactly zero** -- sigmoid and the same-u
+ablation agree to four decimals, and `block_diagonal="auto"` independently
+selected `True`, so psi structurally cannot reach u.
+
+The sharpest control: adding velocities to the observation (`entity_dim=4`)
+*destroys* the reading -- psi lag-0 falls to 0.165, below the 0.200 majority
+floor. Same code, same radius, but the metric becomes sqrt(dx^2 + dv^2). The
+"fixed **physical** distance" clause is load-bearing: the threshold must live in
+the metric contacts actually happen in.
+
+### 4.13 Falsifying the condition — it did not survive
+
+Five arms, 24 entities, identical plant / encoder budget / radius rule / noise;
+only the scale structure varies. "Is there a fixed interaction distance" is
+*measured*, not asserted: merge heights are H0 death times, so the widest
+log-radius gap between consecutive heights is the widest band on which H0 is
+constant (`gap`), and its centre's drift across frames says whether it stays put.
+
+| system | gap | drift | psi rollout | dim-matched | psi lag-0 | psi @ +0.3 dex |
+|---|---|---|---|---|---|---|
+| fixed-radius | 0.82 | 0.20 | 0.00% | -54.6% | 0.752 | -0.017 |
+| wide-cutoff | 0.58 | 0.26 | 0.00% | -41.9% | 0.541 | -0.046 |
+| scale-free | 0.29 | 0.31 | -0.00% | +193.8% | 0.519 | **-0.353** |
+| dilating | 0.82 | **1.08** | -0.00% | +1.6% | 0.558 | -0.002 |
+| s2-rips (ref) | 0.30 | 0.45 | 587% | 587% | 0.429 | -0.004 |
+
+**The "fixed physical distance" clause is false.** The `dilating` arm keeps the
+combinatorics and labels of the fixed control while sweeping its threshold over
+three decades -- no absolute radius is right for more than a few frames. Yet psi
+reads the partition at **0.940** lag-0 / **0.805** lag-4 against **0.382 /
+0.337** for the matched full-rank linear channel (majority 0.505), within noise
+of the fixed control. Mechanism, measured: psi's scale-invariant head (Hilbert
+coefficients + normalized Betti) divides the diameter out, giving **mean |corr|
+= 1.0000 over 19 columns** between the dilating and fixed arms. They are the
+same feature. The clause should read *fixed relative to the configuration's own
+scale*.
+
+**The scale-free arm also beats the linear channel** (0.930 vs 0.411 lag-0),
+so the flat prediction was wrong too. What actually separates the systems is
+whether the radius could have been **known in advance**: mis-stating it by 0.3
+decades costs **-0.353** on scale-free against -0.017 / -0.002 / -0.004 on the
+plateau systems. Plateau width *is* the error budget.
+
+**Third independent confirmation of the rank confound.** Against
+`no_topology_same_u` the k=16 delta is `+0.0000` on all four constructed
+systems. The -54.6% "win" the same script first reported against `linear_only`
+was entirely PCA rank -- the identical artifact that inflated Lorenz.
+
 ## 5. What is established, and what is not
 
 **Established**
 - The transplant works mechanically: any HF model, torch module, or callable
   becomes a world model with `sigmoid.wrap(model, inputs)`.
-- Imagination is ~880× cheaper per step than a real forward.
-- On low-dimensional structured dynamics, the topological channel gives ~30%
-  better rollouts at matched dimension (Lorenz).
-- On entity-structured dynamics it reads the topological state at **0.855** vs
-  0.469 for a matched linear channel, and forecasts it 16 steps out above
-  chance where the linear channel is below chance.
-- Sigmoid's H₀ reproduces the `mujoco#3396` DSU island partition exactly
-  (correlation 1.0000, every frame) and the `kernels#22` block salience
-  bit-identically, 13× faster.
-- H₀-via-MST makes persistence cheap enough for a runtime path (0.74 ms/window).
-- The sheaf residual detects structural degeneracy without invoking the model.
+- Imagination is ~880x cheaper per step than a real forward.
+- On entity-structured dynamics psi **represents** topological state that no PCA
+  of the same data recovers: island partition 0.855 vs 0.469 (S²-Rips), contact
+  components 0.778 vs 0.104 (granular). beta_0 at the stated radius equals the
+  ground-truth component count exactly on both.
+- Sigmoid's H0 reproduces the `mujoco#3396` DSU island partition exactly, and the
+  `kernels#22` block salience bit-identically -- 13x faster batch, and 8.6-21.7x
+  faster per block for incremental decode.
+- The sheaf residual detects structural degeneracy without invoking the model,
+  and a spectral-entropy stalk closes the high-entropy blind spot (catches both
+  the low-rank and high-rank tails).
 
-**Not established**
-- That topology helps on transformer activations. Measured at every layer, in
-  two normalizations: it does not.
-- That the world model beats the mean at long horizon on an LLM. It does not.
-- That the certificate is useful on an LLM. It is vacuous at every setting tried.
-- That topology helps *coordinate* regression even on the S² corpus. It does
-  not; carry-forward wins there.
-- Anything about models larger than distilgpt2, or about a real MuJoCo
-  simulation as opposed to the corpus generator's math.
+**Not established -- and several things previously claimed here were wrong**
+- ~~Topology gives ~30% better rollouts on Lorenz.~~ Confounded by PCA rank;
+  the real figure is ~15% at k=1-4 and a *loss* at k=16 (4.1).
+- ~~The gate is a useful cheap OOD detector.~~ It is beaten on mean AUROC by
+  Mahalanobis (0.899) and PCA reconstruction (0.888), both cheaper (4.9). The
+  surviving claim is applicability, not accuracy: it is the only detector that
+  works on an *imagined* state.
+- ~~Block salience is bit-identical to the merged kernel.~~ True only for random
+  gaussians; it failed on 123/200 tie-heavy cases until fixed (4.5).
+- That topology improves **coordinate prediction** anywhere. It does not -- not
+  on tokens, not on S²-Rips, and on the contact world it contributes exactly
+  zero, confirmed by an equality control.
+- That topology helps **forecast** topological state. Lag-1 barely beats a
+  persistence baseline (0.265 vs 0.250) and later lags fall to the floor.
+- That the certificate is useful on an LLM. The scalar bound is vacuous at every
+  setting; the directional estimate is tighter but under-bounds by 2.4-4.6x when
+  residuals are step-correlated, which is exactly when you would want it.
 
-**The honest summary.** The engine is real. The topological channel earns its
-place exactly when the state is a **set of interacting entities** and the
-quantity of interest lives at a **fixed physical scale** — then it is decisive.
-On token sequences it is a monitor, not a predictor. The two structural bugs in
-§4.3 are the more useful finding than either headline: both were silent, both
-produced a psi that looked healthy and carried nothing, and either one alone
-would have been reported as "topology does not help".
+**The honest summary.** Sigmoid **represents** topological structure that linear
+methods cannot, decisively and reproducibly, on systems whose partition is
+causal. It does not yet **predict** with it. The gap between those two verbs is
+the whole remaining research programme, and 4.11 says why it exists: a partition
+that is an observable of the dynamics carries no force on their future.
 
----
+The most transferable finding is still methodological. Every headline number in
+this document that later proved wrong was wrong because a control was missing,
+never because the mathematics failed -- a dimension-matched arm that co-varied
+rank, a parity check that only sampled continuous inputs, an OOD claim with no
+baseline, a forecasting claim with no persistence baseline. The mathematics was
+never the weak point.
 
 ## 6. Open questions worth the next week
 
