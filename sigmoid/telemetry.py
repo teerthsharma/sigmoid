@@ -41,9 +41,64 @@ __all__ = [
     "ReplayResult",
     "StageTiming",
     "Tracepoint",
+    "chebyshev_keep",
     "trace",
     "tracepoint",
 ]
+
+
+# --------------------------------------------------------------------------
+# eviction
+# --------------------------------------------------------------------------
+
+
+def chebyshev_keep(scores: np.ndarray, k: float = 2.0) -> np.ndarray:
+    """Which records to keep, discarding only bounded statistical outliers.
+
+    A ring buffer drops oldest-first, which on a robot discards the frames
+    *around an incident* precisely because they are old -- the opposite of what an
+    investigation needs. Downsampling uniformly is no better: it thins the
+    interesting stretch at the same rate as the idle one.
+
+    Chebyshev's inequality gives a distribution-free alternative
+    (AETHER `AetherChebyshev.lean`). For any finite-variance distribution,
+
+        P(|X - mu| >= k sigma) <= 1 / k^2
+
+    so at most `n / k^2` of `n` records lie beyond `k` standard deviations of an
+    importance score. Evicting only those bounds the discard rate **without
+    assuming a shape** -- which matters, because staleness and salience scores are
+    not normal and a Gaussian assumption would silently over-evict a heavy tail.
+
+    At `k = 2` the ceiling is `n / 4`: at most 25% discarded. Larger `k` keeps more.
+
+    Chebyshev bounds the *population* tail, and a finite sample can exceed it, so
+    the mask is truncated to the ceiling most-extreme-first. Without that this
+    would advertise a bound it does not enforce -- measured on Cauchy-distributed
+    scores, the raw tail test evicts past `n / k^2`.
+
+    Low tail only: a small score means unimportant. The bound still holds, since a
+    one-sided tail is a subset of the two-sided one.
+    """
+    if k <= 1.0:
+        # the ceiling would be >= n, permitting eviction of everything
+        raise ValueError("k must exceed 1 for the Chebyshev ceiling to constrain anything")
+    x = np.asarray(scores, dtype=np.float64).reshape(-1)
+    n = x.shape[0]
+    if n == 0:
+        return np.zeros(0, dtype=bool)
+
+    ceiling = int(np.floor(n / (k * k)))
+    sigma = float(x.std())
+    if sigma <= 1e-12 or ceiling == 0:  # no spread, or no budget to evict
+        return np.ones(n, dtype=bool)
+
+    z = (x - float(x.mean())) / sigma
+    evict = z <= -k
+    if int(evict.sum()) > ceiling:
+        evict = np.zeros(n, dtype=bool)
+        evict[np.argsort(z)[:ceiling]] = True
+    return ~evict
 
 
 # --------------------------------------------------------------------------
@@ -83,6 +138,29 @@ class BlackboxRecorder:
         if len(buf) == buf.maxlen:
             self.dropped += 1
         buf.append(((time.perf_counter() - self.t0) if t is None else t, value))
+
+    def compact(self, channel: str, scores: np.ndarray, k: float = 2.0) -> int:
+        """Shrink a channel by Chebyshev eviction. Returns records discarded.
+
+        The alternative to letting the ring buffer drop oldest-first. Pass an
+        importance score per record -- gate score, latency, action magnitude,
+        whatever the investigation will care about -- and at most `n / k^2` of the
+        least important are removed. See `chebyshev_keep`.
+        """
+        buf = self.channels.get(channel)
+        if buf is None:
+            return 0
+        items = list(buf)
+        keep = chebyshev_keep(scores, k)
+        if keep.shape[0] != len(items):
+            raise ValueError(
+                f"scores has {keep.shape[0]} entries, channel {channel!r} has {len(items)}"
+            )
+        removed = int((~keep).sum())
+        buf.clear()
+        buf.extend(item for item, ok in zip(items, keep, strict=True) if ok)
+        self.dropped += removed
+        return removed
 
     def __enter__(self) -> BlackboxRecorder:
         return self
@@ -484,6 +562,28 @@ def demo() -> None:
         back = BlackboxRecorder.load(p)
         assert np.array_equal(back.array("state"), log.array("state")), "log round trip lost data"
     print("  save/load           arrays bit-identical")
+
+    # ---- Chebyshev eviction holds its ceiling on every distribution shape
+    for name, sample in (
+        ("gaussian", np.random.default_rng(1).normal(size=1000)),
+        ("cauchy", np.random.default_rng(2).standard_cauchy(size=1000)),
+        ("all-identical", np.full(1000, 3.0)),
+    ):
+        for kk in (2.0, 3.0):
+            kept = chebyshev_keep(sample, kk)
+            evicted = int((~kept).sum())
+            ceiling = int(np.floor(len(sample) / (kk * kk)))
+            assert evicted <= ceiling, f"{name} k={kk}: evicted {evicted} > ceiling {ceiling}"
+    g = chebyshev_keep(np.random.default_rng(1).normal(size=1000), 2.0)
+    print(f"  chebyshev           k=2 kept {int(g.sum())}/1000, ceiling 250 respected")
+
+    rec2 = BlackboxRecorder(capacity=1000)
+    for i in range(200):
+        rec2.record("gate", float(i))
+    removed = rec2.compact("gate", np.asarray(rec2.values("gate")), k=2.0)
+    assert removed <= 200 // 4, f"compact evicted {removed} beyond the ceiling"
+    assert len(rec2.channels["gate"]) == 200 - removed
+    print(f"  compact             discarded {removed} least-important of 200")
 
     # ---- profiler percentiles
     prof = LatencyProfiler()

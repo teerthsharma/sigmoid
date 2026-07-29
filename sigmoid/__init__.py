@@ -40,6 +40,26 @@ from .agent import (
 )
 from .bench import ArmResult, BenchReport, compare, rollout_error
 from .control import Plan, TopologicalMPC, beta0_cost, target_cost
+from .deploy import (
+    ExportResult,
+    HardwareProbe,
+    HardwareReport,
+    Precision,
+    PrecisionPolicy,
+    PrecisionState,
+    QuantizedOperator,
+    QuantReport,
+    StagingError,
+    WeightStore,
+    battery_percent,
+    export_model,
+    gpu_temperature_c,
+    quantization_report,
+    quantization_table,
+    quantize_operator,
+    row_relative_error,
+    sha256_file,
+)
 from .engine import Rollout, SigmoidConfig, SigmoidWorldModel, wrap
 from .foresight import (
     ForesightResult,
@@ -48,6 +68,16 @@ from .foresight import (
     KinematicInterlock,
     SubGoal,
     VisualForesight,
+)
+from .governor import (
+    ENTITY_DELTA_THRESHOLD,
+    VITAL_NAMES,
+    PlateauReport,
+    Recommendation,
+    SigmoidGovernor,
+    Vitals,
+    VitalsExtractor,
+    plateau_diagnostics,
 )
 from .hooks import HookManager, HookPoint, HookVeto, LoggingHook, TimingHook
 from .inference import (
@@ -58,7 +88,7 @@ from .inference import (
     Session,
 )
 from .nbody import MultiBodyCoupling
-from .operator import CouplingOperator, RolloutCertificate
+from .operator import CouplingOperator, LyapunovGain, RolloutCertificate
 from .providers import Completion, Message, Provider, ProviderError, ToolSpec
 from .realtime import (
     ActionChunker,
@@ -85,6 +115,7 @@ from .telemetry import (
     DeterministicReplay,
     LatencyProfiler,
     Tracepoint,
+    chebyshev_keep,
     trace,
     tracepoint,
 )
@@ -98,11 +129,59 @@ from .triton import (
     topology_attention,
     zero_dim_persistence_salience,
 )
-from .vision import TopoImageEncoder, TopoVisionConfig, euler_characteristic
+from .vision import (
+    TopoImageEncoder,
+    TopoVisionConfig,
+    betti1_bound,
+    euler_characteristic,
+)
+from .viz import (
+    audit,
+    dashboard,
+    render_compute_graph,
+    render_gate_timeline,
+    render_heatmap,
+    render_rollout,
+)
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "betti1_bound",
+    "chebyshev_keep",
+    "LyapunovGain",
+    "audit",
+    "dashboard",
+    "render_compute_graph",
+    "render_gate_timeline",
+    "render_heatmap",
+    "render_rollout",
+    "ENTITY_DELTA_THRESHOLD",
+    "PlateauReport",
+    "Recommendation",
+    "SigmoidGovernor",
+    "VITAL_NAMES",
+    "Vitals",
+    "VitalsExtractor",
+    "plateau_diagnostics",
+    "ExportResult",
+    "HardwareProbe",
+    "HardwareReport",
+    "Precision",
+    "PrecisionPolicy",
+    "PrecisionState",
+    "QuantReport",
+    "QuantizedOperator",
+    "StagingError",
+    "WeightStore",
+    "battery_percent",
+    "export_model",
+    "gpu_temperature_c",
+    "quantization_report",
+    "quantization_table",
+    "quantize_operator",
+    "row_relative_error",
+    "sha256_file",
     "ForesightResult",
     "InterlockVerdict",
     "InverseDynamics",

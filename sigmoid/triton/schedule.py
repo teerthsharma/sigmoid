@@ -53,6 +53,40 @@ def block_centroids(keys: np.ndarray, block_size: int) -> np.ndarray:
     return k.reshape(-1, block_size, k.shape[1]).mean(axis=1)
 
 
+# ---------------------------------------------------------------------------
+# Cauchy-Schwarz block pruning: TRIED, DOES NOT TRANSFER. Recorded so it is not
+# retried.
+#
+# AETHER (apoth3osis.io, `AetherPruning.lean`) proves a zero-false-negative block
+# pruning rule from Cauchy-Schwarz, and this file's top-k salience is exactly the
+# kind of selector that lacks such a guarantee -- its cost is measured after the
+# fact (0.0426 nats KL at topk=4), and nothing rules out having dropped a block
+# holding real attention mass. So the bound was implemented here, in the tighter
+# centroid-plus-radius form:
+#
+#     q.k = q.c_b + q.(k - c_b) <= q.c_b + ||q|| r_b
+#     mass_b <= n_b exp(U_b - L),  L = true max logit over always-attended blocks
+#
+# It is a correct upper bound and it never fires. To prune a 64-key block at
+# eps = 1e-3 the block's ceiling must sit log(1e-3 / 64) = -11.1 nats below the
+# global maximum, and attention logits at scale 1/sqrt(64) span roughly +-3.
+# Measured minimum of the bound, over 60 trials each:
+#
+#     isotropic gaussian keys   radius 9.61   mass_ub >= 2.6e+04
+#     tight clusters (0.15)     radius 1.41   mass_ub >= 1.88
+#     very tight (0.02)         radius 0.19   mass_ub >= 0.47
+#
+# Even the last row would require calling 47% of the softmax mass negligible.
+# The obstruction is the residual radius, which is irreducible for anything close
+# to isotropic, and attention keys are not tight clusters. Same shape of failure
+# as the scalar Banach certificate in `operator.py`: true, and vacuous.
+#
+# Where it WOULD work: a domain whose blocks are genuinely tight relative to the
+# logit spread. Attention is not that domain, so the guarantee stays unavailable
+# here and the honest claim about this schedule remains the measured KL.
+# ---------------------------------------------------------------------------
+
+
 def _distances(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Exact Euclidean distances -- the one place either path measures them.
 

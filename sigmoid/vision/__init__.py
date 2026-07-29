@@ -20,13 +20,14 @@ numpy + scipy only. No PIL, no OpenCV, no torch.
 """
 
 from .encode import TopoImageEncoder, TopoVisionConfig
-from .euler import betti_from_euler, euler_characteristic, euler_curve, to_gray
+from .euler import betti1_bound, betti_from_euler, euler_characteristic, euler_curve, to_gray
 from .threshold import ThresholdResult, cancellation_safe_threshold
 
 __all__ = [
     "ThresholdResult",
     "TopoImageEncoder",
     "TopoVisionConfig",
+    "betti1_bound",
     "betti_from_euler",
     "cancellation_safe_threshold",
     "euler_characteristic",
