@@ -43,6 +43,16 @@ def test_h0_barcode_counts_two_clusters():
     assert finite[-2] < 0.1, "within-cluster merges must be short"
 
 
+def test_h0_barcode_merges_coincident_points_at_zero():
+    """A zero-distance edge is an edge. csr drops explicit zeros, so the MST
+    used to route around coincident points and report them separating at O(1)."""
+    bc = h0_barcode(np.array([[0.0, 0.0], [0.0, 0.0], [1.0, 0.0]]))
+    assert bc.bars.shape[0] == 3, "n points => n H0 bars"
+    deaths = np.sort(bc.bars[:, 1])
+    assert deaths[0] == 0.0, f"coincident pair must merge at 0, got {deaths[0]}"
+    assert deaths[1] == 1.0, f"one real merge at the diameter, got {deaths[1]}"
+
+
 def test_hilbert_coefficients_sum_to_essential_classes():
     """N(1) = births - finite deaths = number of essential classes."""
     bars = np.array([[0.0, 0.4], [0.0, 0.7], [0.0, np.inf]])

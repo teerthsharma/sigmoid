@@ -114,10 +114,19 @@ def h0_barcode(points: np.ndarray) -> Barcode:
         return Barcode(dim=0, bars=np.array([[0.0, np.inf]]), diameter=0.0)
     dist = dist / diameter
 
-    from scipy.sparse.csgraph import minimum_spanning_tree
+    from scipy.sparse.csgraph import csgraph_from_dense, minimum_spanning_tree
 
-    mst = minimum_spanning_tree(dist).toarray()
+    # csr treats an explicit 0.0 as *no edge*, so coincident points lose the
+    # edge between them and the tree routes around it: [[0,0],[0,0],[1,0]] came
+    # out with merge heights [1, 1] instead of [0, 1], inventing a component
+    # that separates at O(1). Same failure the Gram identity caused in
+    # `_pairwise`, one layer down. null_value=inf keeps zero edges; they are
+    # indistinguishable from absences on the way back out, so restore them by
+    # count -- a spanning tree on n points has exactly n-1 edges.
+    graph = csgraph_from_dense(dist, null_value=np.inf)
+    mst = minimum_spanning_tree(graph).toarray()
     heights = np.sort(mst[mst > 0.0])
+    heights = np.concatenate([np.zeros(pts.shape[0] - 1 - heights.shape[0]), heights])
     bars = np.empty((heights.shape[0] + 1, 2), dtype=np.float64)
     bars[:-1, 0] = 0.0
     bars[:-1, 1] = heights

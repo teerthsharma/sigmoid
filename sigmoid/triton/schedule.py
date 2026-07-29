@@ -56,8 +56,9 @@ def block_centroids(keys: np.ndarray, block_size: int) -> np.ndarray:
 def _distances(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Exact Euclidean distances -- the one place either path measures them.
 
-    Deliberately not the Gram identity |x|^2 + |y|^2 - 2x.y that `state._pairwise`
-    uses. On well-separated blocks the two agree (both within 5e-15 of
+    Deliberately not the Gram identity |x|^2 + |y|^2 - 2x.y, which `state._pairwise`
+    used until the same bug was found there. On well-separated blocks the two
+    agree (both within 5e-15 of
     np.linalg.norm at 64 blocks of dim 64), but the identity cancels
     catastrophically once blocks nearly coincide: at 1e-12 separation it clamps
     to exactly 0.0 where the true distance is 3.01e-12, and cdist returns that

@@ -6,6 +6,15 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- `h0_barcode` inherited the `csr_matrix` explicit-zero bug that was previously
+  fixed only in the schedule path. Coincident points lost the zero-length edge
+  between them, so the MST routed around it and reported them separating at a
+  real distance: `[[0,0],[0,0],[1,0]]` gave merge heights `[1, 1]` instead of
+  `[0, 1]`, inventing a component. Now builds the graph with
+  `csgraph_from_dense(..., null_value=inf)` and restores the dropped zero
+  heights by edge count. Bit-identical on clouds with no coincident points.
+
 ## [0.1.0] — 2026-07-29
 
 First public release.
