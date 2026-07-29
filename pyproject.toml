@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sigmoid"
+version = "0.1.0"
+description = "A world-model inference engine built from topological coupling operators"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "scipy>=1.10"]
+
+[project.optional-dependencies]
+h1 = ["ripser>=0.6"]
+torch = ["torch>=2.0", "transformers>=4.40"]
+
+[project.scripts]
+sigmoid = "sigmoid.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sigmoid*"]
