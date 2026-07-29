@@ -620,7 +620,8 @@ model activations.
 | [**teerthsharma.github.io/sigmoid**](https://teerthsharma.github.io/sigmoid/) | rendered walkthrough of the method |
 | [SIGMOID.md](SIGMOID.md) | full mathematics and every measurement, including the negative ones |
 | [AGENDA.md](AGENDA.md) | ranked research directions, and what was deliberately not funded |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | evidence standards for changes |
+| [BENCHMARKS.md](BENCHMARKS.md) | every measured number with its baseline and ablation |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | the evidence standard: a claim needs a control |
 | [CHANGELOG.md](CHANGELOG.md) | release history |
 
 ---
