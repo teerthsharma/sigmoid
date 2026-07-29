@@ -1,0 +1,4 @@
+interface:
+  display_name: "vLLM Topology KV Policy"
+  short_description: "Topology KV policy discipline for vLLM"
+  default_prompt: "Use $vllm-topology-kv-policy to evaluate a topology-aware KV-cache contribution idea for vLLM."
