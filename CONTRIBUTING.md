@@ -22,7 +22,7 @@ So a PR that claims an improvement should say what it was measured against.
 pip install -e ".[dev]"
 pytest -q                      # 57 checks
 ruff check . && ruff format --check .
-python -m sigmoid.schedule     # salience self-check
+python -m sigmoid.triton.schedule     # salience self-check
 ```
 
 - Core depends on **numpy and scipy only**. torch, transformers, ripser and
