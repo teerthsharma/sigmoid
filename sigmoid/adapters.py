@@ -15,8 +15,8 @@ single contract is what lets the rest of the engine be model-agnostic.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 import numpy as np
 

@@ -26,8 +26,8 @@ H1 needs Rips and is calibration-only -- never call it in a hot loop.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from typing import Sequence
 
 import numpy as np
 
@@ -385,7 +385,7 @@ class TopoEncoder:
 
     # ---- fit / encode -----------------------------------------------------
 
-    def fit(self, trajectory: np.ndarray) -> "TopoEncoder":
+    def fit(self, trajectory: np.ndarray) -> TopoEncoder:
         """Calibrate on a hidden-state trajectory of shape (T, D)."""
         traj = np.asarray(trajectory, dtype=np.float64)
         if traj.ndim != 2:
@@ -573,7 +573,7 @@ class TopoEncoder:
         }
 
     @classmethod
-    def from_state_dict(cls, payload: dict) -> "TopoEncoder":
+    def from_state_dict(cls, payload: dict) -> TopoEncoder:
         enc = cls(config=TopoEncoderConfig(**payload["config"]))
         enc.h_center_ = payload["h_center_"]
         enc.h_scale_ = payload["h_scale_"]

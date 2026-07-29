@@ -262,7 +262,7 @@ class CouplingOperator:
         states: np.ndarray,
         next_states: np.ndarray,
         actions: np.ndarray | None = None,
-    ) -> "CouplingOperator":
+    ) -> CouplingOperator:
         """Ridge-fit T on paired states.
 
         Closed form: W = Y^T X (X^T X + lambda I)^{-1}. No gradient descent --
@@ -506,7 +506,7 @@ class CouplingOperator:
         }
 
     @classmethod
-    def from_state_dict(cls, payload: dict) -> "CouplingOperator":
+    def from_state_dict(cls, payload: dict) -> CouplingOperator:
         rho_max = payload["rho_max"]
         op = cls(
             ridge=float(payload["ridge"]),

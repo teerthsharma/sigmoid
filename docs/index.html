@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sigmoid — turn any model into a world model</title>
+<meta name="description" content="A world-model inference engine built from topological coupling operators. Persistent homology to coupling operator to Banach fixed point.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◠</text></svg>">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#12151a; --line:#232830; --ink:#e6e9ef;
+    --dim:#98a2b3; --accent:#6ee7b7; --accent2:#7dd3fc; --warn:#fbbf24;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:light){
+    :root{--bg:#fbfcfd;--panel:#fff;--line:#e3e8ef;--ink:#111827;--dim:#5b6472;
+          --accent:#059669;--accent2:#0369a1;--warn:#b45309;}
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .wrap{max-width:860px;margin:0 auto;padding:0 24px}
+  a{color:var(--accent2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre{font-family:var(--mono)}
+  code{font-size:.88em;background:var(--panel);border:1px solid var(--line);
+       border-radius:4px;padding:.1em .38em}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+      padding:16px 18px;overflow-x:auto;font-size:13.5px;line-height:1.6}
+  pre code{background:none;border:0;padding:0;font-size:inherit}
+  header{padding:72px 0 40px;border-bottom:1px solid var(--line);text-align:center}
+  h1{font-size:52px;margin:0 0 8px;letter-spacing:-.03em;font-weight:700}
+  .tag{color:var(--dim);font-size:19px;margin:0 0 20px}
+  .pill{display:inline-block;font-family:var(--mono);font-size:12px;color:var(--dim);
+        border:1px solid var(--line);border-radius:999px;padding:5px 13px;margin:3px}
+  .cta{display:inline-block;margin-top:22px;background:var(--accent);color:#04120c;
+       font-weight:650;padding:11px 22px;border-radius:8px;font-size:15px}
+  .cta:hover{text-decoration:none;filter:brightness(1.08)}
+  .cta.ghost{background:none;color:var(--ink);border:1px solid var(--line);margin-left:8px}
+  h2{font-size:27px;margin:56px 0 6px;letter-spacing:-.02em}
+  h2 .num{color:var(--accent);font-family:var(--mono);font-size:16px;margin-right:10px}
+  h3{font-size:18px;margin:32px 0 6px}
+  .lede{color:var(--dim);margin:0 0 18px}
+  section{padding-top:8px}
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:12.5px;text-transform:uppercase;
+     letter-spacing:.06em}
+  td.n,th.n{text-align:right;font-family:var(--mono)}
+  .win{color:var(--accent);font-weight:650}
+  figure{margin:22px 0;padding:20px;background:var(--panel);
+         border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+  figcaption{color:var(--dim);font-size:13px;margin-top:12px;text-align:center}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));margin:20px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .card h4{margin:0 0 6px;font-size:15px}
+  .card p{margin:0;color:var(--dim);font-size:13.5px;line-height:1.55}
+  .note{border-left:3px solid var(--accent);background:var(--panel);
+        padding:14px 18px;border-radius:0 8px 8px 0;margin:20px 0}
+  .note.warn{border-left-color:var(--warn)}
+  .note p{margin:0}
+  .note strong{color:var(--ink)}
+  footer{margin-top:80px;padding:32px 0 60px;border-top:1px solid var(--line);
+         color:var(--dim);font-size:14px;text-align:center}
+  .eq{text-align:center;font-family:var(--mono);font-size:15px;color:var(--ink);
+      background:var(--panel);border:1px solid var(--line);border-radius:8px;
+      padding:14px;margin:16px 0;overflow-x:auto}
+  ul{padding-left:20px}li{margin:5px 0}
+  svg{max-width:100%;height:auto;display:block;margin:0 auto}
+  .st{font:600 12px var(--mono);fill:var(--ink)}
+  .sd{font:11px var(--mono);fill:var(--dim)}
+  nav.toc{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);
+          padding:11px 0;font-size:13.5px;z-index:10}
+  nav.toc a{color:var(--dim);margin-right:18px}
+  nav.toc a:hover{color:var(--ink)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>sigmoid</h1>
+    <p class="tag">Turn any model into a world model — without touching its weights.</p>
+    <div>
+      <span class="pill">persistent homology</span>
+      <span class="pill">coupling operator</span>
+      <span class="pill">Banach fixed point</span>
+      <span class="pill">numpy + scipy</span>
+    </div>
+    <div>
+      <a class="cta" href="https://github.com/teerthsharma/sigmoid">GitHub</a>
+      <a class="cta ghost" href="#how">How it works</a>
+    </div>
+  </div>
+</header>
+
+<nav class="toc"><div class="wrap">
+  <a href="#idea">Idea</a><a href="#how">Pipeline</a><a href="#math">Mathematics</a>
+  <a href="#results">Results</a><a href="#when">When it pays</a><a href="#start">Start</a>
+</div></nav>
+
+<div class="wrap">
+
+<section id="idea">
+<h2><span class="num">01</span>The idea</h2>
+<p class="lede">A model predicts the next token. A world model predicts what happens next — cheaply, and knows when it stopped being right.</p>
+
+<p>A trained network already computes a rich internal state; what it lacks is a
+<em>dynamics</em> over that state you can run without paying for the network. <code>sigmoid</code>
+supplies one. It reads activations, compresses each window into a topological
+signature, fits a linear operator that advances the signature, and rolls the
+operator forward in place of the model.</p>
+
+<p>The operator is a ridge solve — convex, closed-form, no gradients — so
+calibration is seconds and one imagined step is a single matrix–vector product.</p>
+
+<div class="grid">
+  <div class="card"><h4>State</h4><p>Persistence barcode plus a decodable PCA channel, <code>z = [ψ ; u]</code>.</p></div>
+  <div class="card"><h4>Dynamics</h4><p>Ridge-fit linear operator, optionally action-conditioned.</p></div>
+  <div class="card"><h4>Self-check</h4><p>A cohomological obstruction that fires without invoking the model.</p></div>
+</div>
+</section>
+
+<section id="how">
+<h2><span class="num">02</span>The pipeline</h2>
+<p class="lede">Expensive topology at calibration; a matvec and two norms at runtime.</p>
+
+<figure>
+<svg viewBox="0 0 820 208" role="img" aria-label="Pipeline from model activations through encoder and operator to a gated rollout">
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#7dd3fc"/>
+    </marker>
+    <style>.bx{fill:none;stroke:#7dd3fc;stroke-width:1.4;rx:9}
+           .ln{stroke:#7dd3fc;stroke-width:1.4;marker-end:url(#a)}</style>
+  </defs>
+  <rect class="bx" x="8"   y="62" width="128" height="56"/>
+  <text class="st" x="72"  y="86"  text-anchor="middle">model</text>
+  <text class="sd" x="72"  y="104" text-anchor="middle">any nn.Module</text>
+
+  <rect class="bx" x="176" y="62" width="128" height="56"/>
+  <text class="st" x="240" y="86"  text-anchor="middle">activations</text>
+  <text class="sd" x="240" y="104" text-anchor="middle">(T, D) window</text>
+
+  <rect class="bx" x="344" y="62" width="128" height="56"/>
+  <text class="st" x="408" y="80"  text-anchor="middle">Σ encoder</text>
+  <text class="sd" x="408" y="97"  text-anchor="middle">H₀ barcode</text>
+  <text class="sd" x="408" y="111" text-anchor="middle">z = [ψ ; u]</text>
+
+  <rect class="bx" x="512" y="62" width="128" height="56"/>
+  <text class="st" x="576" y="80"  text-anchor="middle">T operator</text>
+  <text class="sd" x="576" y="97"  text-anchor="middle">ridge, closed form</text>
+  <text class="sd" x="576" y="111" text-anchor="middle">97 µs / step</text>
+
+  <rect class="bx" x="680" y="62" width="128" height="56"/>
+  <text class="st" x="744" y="86"  text-anchor="middle">rollout</text>
+  <text class="sd" x="744" y="104" text-anchor="middle">predicted future</text>
+
+  <line class="ln" x1="136" y1="90" x2="172" y2="90"/>
+  <line class="ln" x1="304" y1="90" x2="340" y2="90"/>
+  <line class="ln" x1="472" y1="90" x2="508" y2="90"/>
+  <line class="ln" x1="640" y1="90" x2="676" y2="90"/>
+
+  <rect class="bx" x="512" y="150" width="296" height="44" style="stroke:#6ee7b7"/>
+  <text class="st" x="660" y="170" text-anchor="middle" style="fill:#6ee7b7">sheaf gate</text>
+  <text class="sd" x="660" y="186" text-anchor="middle">is this still trustworthy?</text>
+  <line x1="660" y1="146" x2="660" y2="122" stroke="#6ee7b7" stroke-width="1.4" marker-end="url(#a)"/>
+</svg>
+<figcaption>The model runs once per calibration window. After that, imagination is arithmetic.</figcaption>
+</figure>
+</section>
+
+<section id="math">
+<h2><span class="num">03</span>The mathematics</h2>
+<p class="lede">Three constructions, each doing one job.</p>
+
+<h3>H₀ without building a complex</h3>
+<p>For a Vietoris–Rips filtration the H₀ death times <em>are</em> the single-linkage
+merge heights — the edge weights of the Euclidean minimum spanning tree. So the
+barcode is exact and costs one MST, with no simplicial complex anywhere:</p>
+<div class="eq">B₀(X) = { (0, w) : w ∈ MST(X) } ∪ { (0, ∞) }</div>
+<p>That identity is also why the sparse-attention schedule runs 13× faster than the
+reference: merges only ever occur along MST edges, so n−1 edges carry the whole
+barcode where a naive implementation sorts n(n−1)/2 pairs.</p>
+
+<h3>A barcode as a vector</h3>
+<p>A barcode has no fixed length, so a linear operator cannot act on it. The
+numerator of its Hilbert series fixes that — bin births positive, deaths
+negative:</p>
+<div class="eq">N(s) = Σᵢ s^bᵢ − Σᵢ s^dᵢ</div>
+<p>Sanity check that holds in the test suite: <code>N(1)</code> equals the number of
+essential classes.</p>
+
+<h3>The coupling operator and its certificate</h3>
+<p>Fit <code>T</code> by ridge regression on paired states — convex, closed-form:</p>
+<div class="eq">W = (XᵀX + λI)⁻¹ XᵀY</div>
+<p>If the spectral norm ρ of the state block is below 1 the rollout is a
+contraction, and Banach gives a unique fixed point plus an <em>a-priori</em> error
+bound after n steps:</p>
+<div class="eq">E(n) ≤ ε · (1 − ρⁿ) / (1 − ρ)</div>
+
+<div class="note warn"><p><strong>Contraction is reported, never forced.</strong>
+Clipping ρ below 1 buys a tidy certificate by misreporting the dynamics — on a
+chaotic system a positive Lyapunov exponent <em>is</em> expansion. Measured on Lorenz,
+clipping degraded one-step error from 0.067 to 0.317. So <code>rho_max</code> defaults to
+<code>None</code>, and the certificate reports whatever the data actually shows.</p></div>
+
+<h3>The gate, as a sheaf</h3>
+<p>An imagined state cannot be checked against truth — the truth is precisely what
+you declined to compute. So check it against <em>itself</em>. Put two stalks over each
+time index, ψ and u, learn the restriction map <code>R : u → ψ</code> where real data glues,
+and measure the obstruction:</p>
+<div class="eq">r = ‖ R·û − ψ̂ ‖</div>
+<p>Nothing in the least-squares fit forces an imagined ψ to remain the true
+signature of an imagined u, so <code>r</code> grows exactly when the rollout leaves the
+manifold — and it needs no forward pass to compute.</p>
+</section>
+
+<section id="results">
+<h2><span class="num">04</span>Results</h2>
+<p class="lede">Reading topological state that no PCA of the same data recovers.</p>
+
+<table>
+<thead><tr><th>System</th><th class="n">sigmoid</th><th class="n">linear, same budget</th><th class="n">baseline</th></tr></thead>
+<tbody>
+<tr><td>S²-Rips island partition</td><td class="n win">0.855</td><td class="n">0.469</td><td class="n">0.487</td></tr>
+<tr><td>Granular contact components</td><td class="n win">0.778</td><td class="n">0.104</td><td class="n">0.200</td></tr>
+<tr><td>β₀ vs true component count</td><td class="n win">1.0000</td><td class="n">—</td><td class="n">exact</td></tr>
+</tbody>
+</table>
+
+<table>
+<thead><tr><th>Operation</th><th class="n">Cost</th></tr></thead>
+<tbody>
+<tr><td>imagine one step</td><td class="n win">97 µs</td></tr>
+<tr><td>encode one window</td><td class="n">0.9 ms</td></tr>
+<tr><td>distilgpt2 forward pass</td><td class="n">86 ms</td></tr>
+<tr><td><strong>ratio</strong></td><td class="n win">~880×</td></tr>
+</tbody>
+</table>
+
+<p>The same H₀ machinery reproduces the block salience of merged kernel
+<a href="https://github.com/triton-lang/kernels/pull/22">triton-lang/kernels#22</a>
+bit-identically — 13× faster in batch, and 8.6–21.7× incrementally for
+autoregressive decode, verified bit-exact across 2748 comparisons.</p>
+</section>
+
+<section id="when">
+<h2><span class="num">05</span>When topology pays</h2>
+<p class="lede">Two clauses, both established by trying to break them.</p>
+
+<div class="note"><p><strong>Representation.</strong> The component count must have a
+<em>plateau in radius</em> — a band, fixed relative to the configuration's own scale,
+on which H₀ is constant. The plateau centre is the interaction radius; its width
+is how much error in stating that radius the encoder absorbs.</p></div>
+
+<div class="note"><p><strong>Prediction.</strong> That partition must be an
+<em>input to the dynamics</em>, not merely an <em>observable of them</em>.</p></div>
+
+<p>Entity systems with contact radii satisfy both — what merges determines what
+moves. Token sequences satisfy the first and fail the second: ψ there encodes
+lexical repetition, a faithful tally of what already happened, which exerts no
+force on what happens next.</p>
+
+<h3>Scope, stated plainly</h3>
+<p>Representing topological structure works and is reproducible. Predicting with
+it does not yet: ψ contributes ≈0 to coordinate rollout, forecasting topology
+barely beats a persistence baseline, and the certificate stays vacuous on an
+LLM. Every one of those is measured, with the numbers in
+<a href="https://github.com/teerthsharma/sigmoid/blob/main/SIGMOID.md">SIGMOID.md</a>.</p>
+</section>
+
+<section id="start">
+<h2><span class="num">06</span>Start</h2>
+
+<pre><code>pip install -e .</code></pre>
+
+<pre><code>import sigmoid
+
+wm = sigmoid.wrap(model, prompts)     # calibrate on captured activations
+r  = wm.imagine(wm.observe(window), steps=16)
+
+r.hiddens          # predicted activations
+r.grounded_at      # where it stopped trusting itself</code></pre>
+
+<p>For states that are a <em>set</em> of things — particles, bodies, agents — give the
+encoder the entity width and the interaction radius, then plan against it:</p>
+
+<pre><code>from sigmoid.control import TopologicalMPC, target_cost
+
+config = sigmoid.SigmoidConfig(entity_dim=2, abs_radii=(0.9,))
+mpc    = TopologicalMPC(world, action_low=-np.ones(8), action_high=np.ones(8))
+plan   = mpc.plan(window, target_cost(world, goal))
+
+plan.action        # execute this
+plan.feasible      # False -> the model declines to guess</code></pre>
+
+<div>
+  <a class="cta" href="https://github.com/teerthsharma/sigmoid">Read the source</a>
+  <a class="cta ghost" href="https://github.com/teerthsharma/sigmoid/blob/main/SIGMOID.md">The mathematics</a>
+</div>
+</section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <p>MIT © Teerth Sharma ·
+    <a href="https://github.com/teerthsharma/sigmoid">github.com/teerthsharma/sigmoid</a></p>
+    <p>A transplant of the Faraday/Hamilton coupling-operator pattern, from
+    electromagnetic cavities onto model activations.</p>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -13,6 +13,18 @@ operator on topological signatures of the model's own activations, and a sheaf
 consistency gate that says when the imagined future stopped being trustworthy.
 """
 
+from .adapters import capture_from_hook, capture_hidden, layer_names, make_capture_fn
+from .bench import ArmResult, BenchReport, compare, rollout_error
+from .control import Plan, TopologicalMPC, beta0_cost, target_cost
+from .engine import Rollout, SigmoidConfig, SigmoidWorldModel, wrap
+from .nbody import MultiBodyCoupling
+from .operator import CouplingOperator, RolloutCertificate
+from .schedule import (
+    block_centroids,
+    build_topology_block_schedule,
+    zero_dim_persistence_salience,
+)
+from .sheaf import GateReading, SheafGate
 from .state import (
     Barcode,
     TopoEncoder,
@@ -22,18 +34,6 @@ from .state import (
     h1_barcode,
     hilbert_coefficients,
 )
-from .operator import CouplingOperator, RolloutCertificate
-from .sheaf import GateReading, SheafGate
-from .nbody import MultiBodyCoupling
-from .schedule import (
-    block_centroids,
-    build_topology_block_schedule,
-    zero_dim_persistence_salience,
-)
-from .engine import Rollout, SigmoidConfig, SigmoidWorldModel, wrap
-from .control import Plan, TopologicalMPC, beta0_cost, target_cost
-from .adapters import capture_hidden, capture_from_hook, layer_names, make_capture_fn
-from .bench import ArmResult, BenchReport, compare, rollout_error
 
 __version__ = "0.1.0"
 

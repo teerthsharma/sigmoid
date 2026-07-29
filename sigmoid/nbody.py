@@ -54,7 +54,7 @@ class MultiBodyCoupling:
 
     # ---- fit --------------------------------------------------------------
 
-    def fit(self, bodies: list[np.ndarray]) -> "MultiBodyCoupling":
+    def fit(self, bodies: list[np.ndarray]) -> MultiBodyCoupling:
         """Fit on per-body state trajectories, each of shape (T, d), shared T."""
         arrs = [np.asarray(b, dtype=np.float64) for b in bodies]
         if len(arrs) < 2:

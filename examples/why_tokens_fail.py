@@ -41,8 +41,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 
-import sigmoid
 from llm_worldmodel import load_corpus  # same corpus loader as the null result
+
+import sigmoid
 
 MODEL = "distilgpt2"
 WINDOW = 24

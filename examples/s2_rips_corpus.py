@@ -33,7 +33,6 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import sigmoid
-from sigmoid.state import _pairwise
 
 TAU = 2.0 * np.pi
 
@@ -61,8 +60,8 @@ def geodesic_distances(x: np.ndarray) -> np.ndarray:
 
 def island_count(x: np.ndarray, radius: float) -> int:
     """H0 of the Rips graph at `radius` -- the PR's island partition."""
-    from scipy.sparse.csgraph import connected_components
     from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import connected_components
 
     adj = geodesic_distances(x) <= radius
     np.fill_diagonal(adj, False)
@@ -162,7 +161,6 @@ def main() -> int:
     print("  the island partition is the state a controller would actually need.")
     wm = sigmoid.SigmoidWorldModel(config=config).fit([obs])
     Z = wm.encoder.encode_trajectory(obs)
-    truth = islands[config.window - 1 :].astype(float)
     psi, u = Z[:, : wm.encoder.topo_dim], Z[:, wm.encoder.topo_dim :]
 
     # The island count is a step function, so a linear R2 probe is the wrong

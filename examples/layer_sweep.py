@@ -14,15 +14,14 @@ import sys
 import warnings
 from pathlib import Path
 
-import numpy as np
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 warnings.filterwarnings("ignore")
 
-import sigmoid
 from llm_worldmodel import MODEL, load_corpus
+
+import sigmoid
 
 HORIZONS = (1, 4, 16)
 
