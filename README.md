@@ -13,7 +13,6 @@
 </p>
 
 <p align="center">
-  <a href="https://teerthsharma.github.io/sigmoid/"><img src="https://img.shields.io/badge/docs-github.io-blue?style=flat-square" alt="Docs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square&color=00aaff" alt="MIT"></a>
   <a href="#12-validation"><img src="https://img.shields.io/badge/tests-57%20passing-brightgreen?style=flat-square" alt="Tests"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/core%20deps-numpy%20%2B%20scipy-lightgrey?style=flat-square" alt="Deps"></a>
@@ -636,7 +635,7 @@ model activations.
 
 | Document | Contents |
 |---|---|
-| [**teerthsharma.github.io/sigmoid**](https://teerthsharma.github.io/sigmoid/) | rendered walkthrough of the method |
+| [docs/index.html](docs/index.html) | rendered walkthrough of the method — open locally, or enable Pages on `main` `/docs` to serve it |
 | [SIGMOID.md](SIGMOID.md) | full mathematics and every measurement, including the negative ones |
 | [AGENDA.md](AGENDA.md) | ranked research directions, and what was deliberately not funded |
 | [BENCHMARKS.md](BENCHMARKS.md) | every measured number with its baseline and ablation |
