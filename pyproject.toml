@@ -25,7 +25,7 @@ torch = ["torch>=2.0", "transformers>=4.40"]
 sigmoid = "sigmoid.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["sigmoid*"]
+where = ["src"]
 
 [tool.ruff]
 line-length = 100

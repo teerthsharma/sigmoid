@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 DEFAULT_KERNEL = Path(
     "C:/Users/seal/Documents/GitHub/kernels/kernels/topology_sparse_attention.py"

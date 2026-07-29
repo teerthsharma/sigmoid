@@ -25,8 +25,8 @@ cavities onto model activations.
 | `faraday-main` | barcode → Hilbert-series embedding → least-squares coupling operator `T` → Banach fixed point ("God Tensor") | `state.py`, `operator.py` |
 | `hamliton-main` | N-body extension: joint operator over `Ψ = ψ₁ ⊗ … ⊗ ψ_N`, rank-R truncation, overlap matrix, gauge projection | `nbody.py` |
 | `topological-ml-toolkit` | persistence/Betti-curve API shape, Mapper covers, sheaf consistency residual, `PHFeaturizer` feature contract | `state.py`, `sheaf.py` |
-| `discover-topology` skill | the promotion gates, same-budget ablation discipline, "do not compute Rips in the hot path" | `bench.py`, the two-tier encoder |
-| `vllm-topology-kv-policy` skill | offline-topology / cheap-runtime-gate split | engine architecture |
+| the `discover-topology` methodology | the promotion gates, same-budget ablation discipline, "do not compute Rips in the hot path" | `bench.py`, the two-tier encoder |
+| the `vllm-topology-kv-policy` methodology | offline-topology / cheap-runtime-gate split | engine architecture |
 | `lambda-topo-main` | topological invariants as the characterisation of a field, not a decoration | framing |
 | `mujoco#3396` | the S²–Vietoris–Rips corpus: unit directions with tangent velocities, geodesic Rips, islands as H₀ | `examples/s2_rips_corpus.py` |
 | `triton-lang/kernels#22` | 0D-persistence salience over key-block centroids → causal CSR block schedule | `schedule.py` |
