@@ -376,10 +376,97 @@ loops it over flattened batch×heads.
 
 ---
 
+## 11. Topological vision
+
+Single frame, RTX 4060 host, `TopoImageEncoder` defaults (12 thresholds, 4x4 patch grid).
+
+| resolution | `chi` only | full encode | 50 ms budget |
+|---|---|---|---|
+| 64x64 | 0.020 ms | 0.75 ms | fits |
+| 128x128 | 0.049 ms | 1.34 ms | fits |
+| 256x256 | 0.126 ms | 4.41 ms | fits |
+| 480x640 | — | 15.49 ms | fits |
+
+Cubical against Vietoris-Rips on the same 128x128 image:
+
+| method | input | time |
+|---|---|---|
+| `chi = F-H-V+Q` | 5025 foreground px | **0.044 ms** |
+| `h0_barcode` (MST) | 419 px, **subsampled** | 127 ms |
+
+~2900x, and the subsampling was mandatory: Rips cannot ingest the full mask.
+
+Sensitivity, on a synthetic sequence where a hole opens and closes:
+
+| feature | corr vs ground-truth hole presence |
+|---|---|
+| `b1` channel | **+1.0000** |
+| best single feature | 1.0000 (index 13) |
+
+`SigmoidWorldModel.fit()` accepted the `(120, 50)` encoding directly and imagined
+4 steps, so the `(T, D)` contract holds end to end.
+
+**Bug found by that correlation.** The fallback threshold was the median. On a
+bimodal frame the median *is* the background value, so `img <= median` selects
+every pixel, b0/b1 go constant, and the correlation came back **NaN**. The
+fallback is now a certified widest-gap threshold with no chi target.
+
+---
+
+## 12. Real-time execution
+
+`SafetyController.check` over a 12-vector, 20k calls:
+
+| statistic | value | budget |
+|---|---|---|
+| p50 | 3.6 us | — |
+| p99 | 9.8 us | 1 ms — **passes** |
+| **max** | **9458 us** | 1 ms — **fails by 9x** |
+
+The excursion is a CPython GC pause or an OS scheduling slice; the hot path
+allocates nothing. Under a deliberately wedged policy thread holding the GIL,
+p99 measured 8.5 us — still inside budget, so the independence claim holds.
+
+**Verdict: sub-millisecond at p99, not hard real-time.** A safety stop belongs in
+a separate RT process, a C extension, or a microcontroller.
+
+| component | measurement |
+|---|---|
+| watchdog false positives, healthy jittery loop | **0** |
+| watchdog detection on a real hang | 4.7 ms |
+| chunker stale actions discarded | 2 (35.7 ms staleness) |
+| contact-rich tier, p99 | 0.049 ms against a 20 ms budget |
+
+---
+
+## 13. Telemetry
+
+| operation | cost |
+|---|---|
+| `record()` | **0.24 us** |
+| tracepoint disabled | **0.07 us** |
+| tracepoint enabled | 1.43 us |
+
+Fits a 20 ms control budget with three orders of magnitude to spare.
+
+| property | result |
+|---|---|
+| replay of a seeded pipeline | **bit-identical** (`np.array_equal`, 64 steps) |
+| replay of an *unseeded* pipeline | correctly reported non-exact |
+| ring buffer at capacity 100, 1000 records | capped at 100, 900 dropped and counted |
+| save/load round trip | arrays bit-identical |
+| BLAS determinism on this host | True |
+
+
+---
+
 ## Reproducing
 
 ```bash
 python -m pytest tests/ -q                 # 207 checks
+python -m sigmoid.vision.encode            # vision latency + Rips comparison
+python -m sigmoid.realtime                 # safety p50/p99/max, watchdog
+python -m sigmoid.telemetry                # overhead + bit-exact replay
 python examples/s2_rips_corpus.py
 python examples/contact_world.py
 python examples/falsify_condition.py

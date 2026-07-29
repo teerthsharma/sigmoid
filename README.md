@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square&color=00aaff" alt="MIT"></a>
-  <a href="#12-validation"><img src="https://img.shields.io/badge/tests-57%20passing-brightgreen?style=flat-square" alt="Tests"></a>
+  <a href="#12-validation"><img src="https://img.shields.io/badge/tests-207%20passing-brightgreen?style=flat-square" alt="Tests"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/core%20deps-numpy%20%2B%20scipy-lightgrey?style=flat-square" alt="Deps"></a>
   <a href="#9-when-topology-pays"><img src="https://img.shields.io/badge/claims-falsification--tested-orange?style=flat-square" alt="Falsification tested"></a>
   <a href="SIGMOID.md"><img src="https://img.shields.io/badge/negatives-published-red?style=flat-square" alt="Negatives published"></a>
@@ -56,9 +56,12 @@ merged Triton kernel salience of
 Those schedules drive a working generation loop rather than a study: a KV-cached
 inference engine that reproduces HuggingFace greedy decoding token-for-token on
 its dense control, an agentic runtime with Hermes tool calling over twelve LLM
-providers, and a robot bridge in which the world model can **refuse** a plan.
-Whether the sparse path is *faster* is reported honestly in §18 — on models
-this GPU can run, it is not.
+providers, and a robot bridge in which the world model can **refuse** a plan. For
+vision, digital topology on a grid replaces point-cloud persistence entirely —
+`chi = F−H−V+Q` is exact, O(pixels), and encodes a 480×640 frame in **15.5 ms**,
+roughly 2900× faster than a Rips baseline that cannot ingest the full frame.
+Whether the sparse attention path is *faster* is reported honestly in §18 — on
+models this GPU can run, it is not.
 
 Four of my own claims that adversarial review falsified are reported in full,
 along with the two-clause condition that replaced my original hypothesis.
@@ -92,6 +95,9 @@ out-of-distribution detection, inference engines
 | [16](#16-the-inference-engine) | The inference engine |
 | [17](#17-agentic-runtime-for-robots) | Agentic runtime for robots |
 | [18](#18-does-sparse-attention-actually-pay) | Does sparse attention actually pay? |
+| [19](#19-topological-vision) | Topological vision |
+| [20](#20-real-time-execution) | Real-time execution |
+| [21](#21-telemetry-and-deterministic-replay) | Telemetry and deterministic replay |
 
 ---
 
@@ -124,6 +130,37 @@ Three properties follow that a trained dynamics model does not have:
    against *itself*, which is the only check available when the ground truth is
    precisely the thing you declined to compute.
 
+### 1.1 Prior art
+
+Where this sits, and where the alternatives are better. Every cell is either a
+number measured on this host or marked `not run` — nothing is projected.
+
+| System | Dynamics | Fit cost | Rollout guarantee | H1/H2 | Nonlinear |
+|---|---|---|---|---|---|
+| Dreamer-family RSSM | learned recurrent | gradient training | none | n/a | **yes** |
+| Diffusion world models | learned denoiser | gradient training | none | n/a | **yes** |
+| `ripser` 0.6.14 | n/a (persistence only) | n/a | n/a | **yes** | n/a |
+| `sigmoid` | ridge-fit linear operator | **one closed-form solve** | **Banach bound when ρ<1** | calibration only | no |
+
+**Where sigmoid loses, plainly.** The operator is *linear*, so a learned
+recurrent or diffusion world model is strictly more expressive and will beat it
+on any dynamics that genuinely needs nonlinearity — measured here: on distilgpt2
+activations sigmoid does not beat predicting the dataset mean at long horizon
+(§8.4). The runtime path computes H0 only; H1 needs a Rips complex and stays in
+calibration. And a certificate exists only when ρ < 1, which chaotic systems
+violate by definition (§5).
+
+**Where it wins.** Calibration is one ridge solve rather than a training run, an
+imagined step is a matvec at ~97 µs against an 86 ms forward pass, and the
+rollout carries an error bound and a self-consistency gate that needs no model
+call. On a *grid*, digital topology is exact and O(pixels): measured **0.044 ms**
+for `chi` on a 5025-pixel mask against **127 ms** for `ripser`-style H0 on 419
+*subsampled* points of the same image — a ~2900× gap, and Rips cannot ingest the
+full frame at all.
+
+Not benchmarked: GUDHI, giotto-tda, TDAstats. They are not installed on this host
+and inventing a figure for them would be worse than the gap.
+
 ---
 
 ## 2. Architecture
@@ -152,6 +189,14 @@ tree; H₁ requires a Rips complex and is calibration-only.
 | [`nbody.py`](sigmoid/nbody.py) | Hamilton-tensor multi-entity coupling with rank-R truncation |
 | [`adapters.py`](sigmoid/adapters.py) | Capture from HuggingFace models, torch modules, callables |
 | [`bench.py`](sigmoid/bench.py) | Matched-budget ablations and promotion gates |
+| [`inference.py`](sigmoid/inference.py) | prefill + decode, KV cache, incremental schedules |
+| [`vision/`](sigmoid/vision/) | **Integration API** — exact digital topology on images, `chi = F−H−V+Q` |
+| [`realtime.py`](sigmoid/realtime.py) | safety stop, action chunking, watchdog, latency tiers |
+| [`telemetry.py`](sigmoid/telemetry.py) | blackbox log, bit-exact replay, tracepoints |
+| [`agent.py`](sigmoid/agent.py) | Hermes tool calling, agent loop |
+| [`robot.py`](sigmoid/robot.py) | agent ↔ world-model bridge, refusal as a value |
+| [`providers/`](sigmoid/providers/) | **Integration API** — 12 LLM backends, env-only keys |
+| [`hooks.py`](sigmoid/hooks.py) | hook points with veto and failure isolation |
 | [`cli.py`](sigmoid/cli.py) | `python -m sigmoid fit \| roll \| bench` |
 
 Nested directories are **integration APIs**, not package nesting. The core
@@ -534,7 +579,7 @@ tie-heavy families.
 ## 12. Validation
 
 ```bash
-python -m pytest tests/ -q                  # 57 checks; each file also runs standalone
+python -m pytest tests/ -q                  # 207 checks; each file also runs standalone
 python -m sigmoid.triton.schedule           # salience parity self-check
 python -m sigmoid.mujoco.island             # beta_0 == island count, 12/12
 python -m sigmoid.mujoco.corpus             # corpus is topologically non-static
@@ -771,6 +816,104 @@ a fused decode kernel; the merged kernel cannot serve decode because it requires
 Schedule construction is **not** the bottleneck, which is worth stating since
 this project spent effort making it 13× faster: at context 960 it is 44 ms
 against 199 ms of attention, ~18% of the sparse path.
+
+---
+
+## 19. Topological vision
+
+A robot vision path has a 10–50 ms budget. Vietoris–Rips persistence does not fit
+in it: a 256×256 frame is 65k points and the MST is O(n²d). On a **grid** none of
+that is needed. For a binary mask with 4-connected foreground the Euler
+characteristic is exact and costs four array reductions:
+
+```
+chi = F − H − V + Q
+```
+
+with `F` foreground pixels, `H` horizontally adjacent foreground pairs, `V`
+vertically adjacent pairs, `Q` fully-foreground 2×2 blocks.
+
+```python
+from sigmoid.vision import TopoImageEncoder
+obs = TopoImageEncoder().encode_video(frames)   # (T, D)
+wm  = sigmoid.SigmoidWorldModel().fit([obs])    # a world model on video
+```
+
+Measured on the RTX 4060 host, single frame:
+
+| resolution | `chi` | full encode | 50 ms budget |
+|---|---|---|---|
+| 64×64 | 0.020 ms | 0.75 ms | fits |
+| 128×128 | 0.049 ms | 1.34 ms | fits |
+| 256×256 | 0.126 ms | 4.41 ms | fits |
+| **480×640** | — | **15.49 ms** | **fits** |
+
+Against a Rips baseline on the same image: `chi` at **0.044 ms** on 5025 pixels
+versus **127 ms** for H0 on 419 *subsampled* pixels — ~2900×, and the subsampling
+was necessary because Rips cannot take the full mask.
+
+**The correctness rule that makes it usable.** Equal `chi` does **not** prove
+equal topology: a component birth and a hole birth cancel in `chi = b0 − b1`, so
+"the longest run of thresholds with the same chi" is an unsound selector.
+`euler.demo()` constructs that false plateau deliberately. Stability is therefore
+measured in the *intensity* domain — the widest gap between consecutive distinct
+pixel values, whose float64 midpoint is strictly representable inside it. No
+qualifying gap means `certified=False` with a reason, never a silent guess.
+
+Verified end to end: `b1` tracks a hole opening and closing at **corr +1.0000**,
+and `SigmoidWorldModel.fit()` accepted the resulting `(120, 50)` array directly.
+
+The construction is from my cancellation-safe thresholding work in
+`computer-vision-basics-in-microsoft-excel`.
+
+## 20. Real-time execution
+
+| tier | budget | measured (p99) | verdict |
+|---|---|---|---|
+| safety-critical stop | < 1 ms | **9.8 µs** | passes at p99, **not** at max — see below |
+| contact-rich manipulation | 10–20 ms | 0.049 ms | passes |
+
+**The honest answer on the sub-millisecond budget.** `SafetyController.check`
+over a 12-vector, 20k calls: **p50 3.6 µs, p99 9.8 µs, max 9458 µs.** p99 clears
+1 ms by two orders of magnitude. The max misses it by 9×. That excursion is a
+CPython GC pause or an OS scheduling slice, not this code — the hot path
+allocates nothing and pre-sizes every buffer.
+
+So the defensible claim is: **sub-millisecond at p99, not hard real-time.** A
+genuine safety stop belongs outside CPython — a separate process at real-time
+priority, a C extension holding no GIL, or a microcontroller on the actuator bus.
+`SafetyController` is a fast in-process pre-check to layer *under* one of those.
+Anything stronger would be claiming a deadline this runtime cannot hold.
+
+`ActionChunker` handles the temporal misalignment that makes chunking useful:
+the world moves during inference, so on swap it discards the stale head by
+measured elapsed time and blends the seam over `blend` actions — a step
+discontinuity at a chunk boundary is a jerk in a real arm, and
+`stats.max_boundary_jump` records the worst one. `Watchdog` measured **0** false
+positives on a healthy jittery loop and **4.7 ms** detection on a real hang.
+
+## 21. Telemetry and deterministic replay
+
+You cannot pause the physical world, and a breakpoint in a control loop destroys
+the state you wanted to inspect. So: log against one clock, replay off-robot
+bit-exactly, inspect without stopping.
+
+| operation | cost |
+|---|---|
+| `record()` | **0.24 µs** |
+| tracepoint, disabled | **0.07 µs** |
+| tracepoint, enabled | 1.43 µs |
+
+Cheap enough to leave in a 20 ms control budget — telemetry costing 5 ms inside
+that budget is not telemetry, it is the bug.
+
+Replay asserts `np.array_equal`, **bit-identical, not `allclose`**. A tolerance
+would hide the thing being hunted: an approximate replay means some state was not
+captured, and that uncaptured state is a candidate cause of the incident. An
+*unseeded* pipeline is correctly reported as non-exact rather than tolerated.
+Nondeterminism sources pinned are listed in the module docstring; GPU kernels are
+named as the one that cannot be, since cuBLAS split-k reduction order varies
+across launches.
 
 ---
 
