@@ -41,6 +41,14 @@ from .agent import (
 from .bench import ArmResult, BenchReport, compare, rollout_error
 from .control import Plan, TopologicalMPC, beta0_cost, target_cost
 from .engine import Rollout, SigmoidConfig, SigmoidWorldModel, wrap
+from .foresight import (
+    ForesightResult,
+    InterlockVerdict,
+    InverseDynamics,
+    KinematicInterlock,
+    SubGoal,
+    VisualForesight,
+)
 from .hooks import HookManager, HookPoint, HookVeto, LoggingHook, TimingHook
 from .inference import (
     GenerationResult,
@@ -95,6 +103,12 @@ from .vision import TopoImageEncoder, TopoVisionConfig, euler_characteristic
 __version__ = "0.1.0"
 
 __all__ = [
+    "ForesightResult",
+    "InterlockVerdict",
+    "InverseDynamics",
+    "KinematicInterlock",
+    "SubGoal",
+    "VisualForesight",
     "ActionChunker",
     "BlackboxRecorder",
     "ConfidenceGate",
