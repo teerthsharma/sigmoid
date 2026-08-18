@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://doi.org/10.5281/zenodo.21997816"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.21997816-1682D4?style=flat-square" alt="DOI 10.5281/zenodo.21997816"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square&color=00aaff" alt="MIT"></a>
   <a href="#12-validation"><img src="https://img.shields.io/badge/tests-322%20passing-brightgreen?style=flat-square" alt="Tests"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/core%20deps-numpy%20%2B%20scipy-lightgrey?style=flat-square" alt="Deps"></a>
