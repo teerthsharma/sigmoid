@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "Sigmoid: a topological world-model inference engine"
+abstract: >-
+  Sigmoid turns any model into a world model without touching its weights.
+  The pipeline runs persistent homology into a Hilbert-series embedding,
+  then into a coupling operator resolved at a Banach fixed point. One
+  imagined step costs 97 microseconds against an 86 millisecond forward
+  pass.
+authors:
+  - family-names: Sharma
+    given-names: Teerth
+    email: teerths57@gmail.com
+version: 0.1.0
+date-released: 2026-08-18
+url: "https://github.com/teerthsharma/sigmoid"
+repository-code: "https://github.com/teerthsharma/sigmoid"
+license: MIT
+keywords:
+  - world models
+  - persistent homology
+  - computational topology
+  - Banach fixed point
+  - coupling operator
+  - model-based inference
+  - reinforcement learning

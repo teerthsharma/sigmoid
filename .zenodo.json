@@ -1,0 +1,20 @@
+{
+  "title": "Sigmoid: a topological world-model inference engine",
+  "description": "<p>Sigmoid turns any model into a world model without touching its weights. The pipeline runs persistent homology into a Hilbert-series embedding, then into a coupling operator resolved at a Banach fixed point. One imagined step costs 97 microseconds against an 86 millisecond forward pass. Integration bridges carry upstream semantics in numpy and import none of the upstream runtime, so agreement with MuJoCo and Triton is testable offline.</p>",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "mit",
+  "creators": [{ "name": "Sharma, Teerth" }],
+  "keywords": [
+    "world models",
+    "persistent homology",
+    "computational topology",
+    "Banach fixed point",
+    "coupling operator",
+    "model-based inference",
+    "reinforcement learning"
+  ],
+  "related_identifiers": [
+    { "identifier": "https://github.com/teerthsharma/sigmoid", "relation": "isSupplementTo", "scheme": "url" }
+  ]
+}
